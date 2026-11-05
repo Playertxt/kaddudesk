@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KadduDesk Server</title>
+<style>
+:root { --bg:#0f1115; --card:#181b22; --line:rgba(255,255,255,.08); --text:#eef0f4; --muted:#9aa1ad; --accent:#ff8a2a; --accent2:#ee4246; --ok:#3ccf91; --bad:#ff5a5f; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin:0; background: radial-gradient(1000px 500px at 0% -10%, rgba(255,138,42,.14), transparent 60%), var(--bg); color: var(--text); font: 14.5px/1.5 system-ui, "Segoe UI", sans-serif; }
+header { display:flex; align-items:center; gap:14px; padding: 22px 28px 8px; }
+header .logo { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display:grid; place-items:center; font-size: 22px; }
+header h1 { margin: 0; font-size: 20px; }
+.badge { display:inline-block; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; background:#232733; border:1px solid var(--line); margin-left: 6px; }
+.badge.ok { color: var(--ok); border-color: rgba(60,207,145,.4); } .badge.bad { color: var(--bad); border-color: rgba(255,90,95,.4); } .badge.warn { color:#ffcc4d; }
+main { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 16px 28px 40px; max-width: 1300px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+.card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.pin { font: 700 40px/1 ui-monospace, Consolas, monospace; letter-spacing: .18em; color: #fff; }
+.pin.hidden { filter: blur(9px); cursor: pointer; }
+.row { display:flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+button { font: inherit; color: var(--text); background:#232733; border:1px solid var(--line); border-radius: 9px; padding: 7px 13px; cursor: pointer; font-weight: 600; }
+button:hover { background:#2b303d; } button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border:0; color:#fff; } button.danger { color: #ff9a9d; }
+input[type=text], input[type=number], select { font: inherit; color: var(--text); background:#0c0e12; border:1px solid var(--line); border-radius: 9px; padding: 7px 10px; }
+.muted { color: var(--muted); } .tiny { font-size: 12px; } code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background:#0c0e12; padding: 2px 6px; border-radius: 6px; }
+.url { display:flex; justify-content: space-between; align-items:center; padding: 8px 10px; border:1px solid var(--line); border-radius: 10px; margin: 6px 0; cursor: pointer; }
+.url.on { border-color: var(--accent); }
+.qr { background: #fff; border-radius: 12px; padding: 8px; width: 180px; height: 180px; display:block; margin: 10px auto 0; }
+table { width: 100%; border-collapse: collapse; } td { padding: 7px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; } tr:last-child td { border: 0; }
+.toggle { display:flex; justify-content: space-between; align-items:center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 12px; }
+.toggle:last-child { border: 0; }
+.switch { position: relative; width: 42px; height: 24px; flex: 0 0 auto; } .switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position:absolute; inset:0; background:#2a2f3b; border-radius: 99px; transition: .15s; cursor: pointer; }
+.switch span:before { content:''; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition: .15s; }
+.switch input:checked + span { background: var(--accent); } .switch input:checked + span:before { transform: translateX(18px); }
+pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px; overflow:auto; font-size: 12px; white-space: pre-wrap; margin: 0; }
+.stat { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; } .stat div { background:#0c0e12; border-radius: 10px; padding: 10px; } .stat b { display:block; font-size: 18px; }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+.wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡</div>
+  <div>
+    <h1><span id="name">KadduDesk</span> <span class="badge" id="adminBadge"></span> <span class="badge" id="runBadge"></span></h1>
+    <div class="muted tiny" id="sub"></div>
+  </div>
+  <div style="flex:1"></div>
+  <button id="pauseBtn"></button>
+  <button class="danger" id="quitBtn">Quit server</button>
+</header>
+<main>
+  <section class="card">
+    <h2>Connect a device</h2>
+    <div class="row between"><div class="muted">PIN</div><div class="row"><button id="pinShow">Show</button><button id="pinNew">New PIN</button><button id="pinSet">Set…</button></div></div>
+    <div class="pin hidden" id="pin">••••••</div>
+    <p class="muted tiny" style="margin:12px 0 4px">In the KadduDesk app on your phone or PC, this PC appears automatically on the same Wi-Fi. Or add it by address:</p>
+    <div id="urls"></div>
+    <img class="qr" id="qr" alt="QR">
+    <p class="muted tiny" style="text-align:center">Scan with a phone camera to open it in a browser.</p>
+    <p class="muted tiny">Certificate fingerprint (check that the app shows the same):<br><code id="fp"></code></p>
+  </section>
+
+  <section class="card">
+    <h2>Live</h2>
+    <div class="stat">
+      <div><span class="muted tiny">Viewers</span><b id="nViewers">0</b></div>
+      <div><span class="muted tiny">Stream</span><b id="sFps">–</b></div>
+      <div><span class="muted tiny">Bitrate</span><b id="sKbps">–</b></div>
+    </div>
+    <p class="tiny muted" id="encInfo"></p>
+    <h2 style="margin-top:16px">Connected now</h2>
+    <table id="clients"></table>
+    <div class="row" style="margin-top:8px"><button id="kickAll" class="danger">Disconnect everyone</button><button id="reprobe">Re-detect encoder & screens</button></div>
+    <h2 style="margin-top:18px">Remembered devices</h2>
+    <table id="devices"></table>
+  </section>
+
+  <section class="card">
+    <h2>Permissions</h2>
+    <div class="toggle"><div>Ask me before anyone connects<div class="muted tiny">A Yes/No prompt appears on this PC for each login</div></div><label class="switch"><input type="checkbox" data-k="requireApproval"><span></span></label></div>
+    <div class="toggle"><div>Allow mouse & keyboard control<div class="muted tiny">Off = view-only</div></div><label class="switch"><input type="checkbox" data-k="allowControl"><span></span></label></div>
+    <div class="toggle"><div>Allow file transfer</div><label class="switch"><input type="checkbox" data-k="allowFiles"><span></span></label></div>
+    <div class="toggle"><div>Allow clipboard sync</div><label class="switch"><input type="checkbox" data-k="allowClipboard"><span></span></label></div>
+    <div class="toggle"><div>Stream PC sound</div><label class="switch"><input type="checkbox" data-k="allowAudio"><span></span></label></div>
+    <div class="toggle"><div>Allow power actions<div class="muted tiny">Lock, sleep, restart, shut down</div></div><label class="switch"><input type="checkbox" data-k="allowPower"><span></span></label></div>
+  </section>
+
+  <section class="card">
+    <h2>Server</h2>
+    <div class="toggle"><div><b>Service mode</b> <span class="badge" id="svcBadge"></span><div class="muted tiny">Runs as a Windows service: see &amp; control the lock screen, sign-in screen and UAC prompts, real Ctrl+Alt+Del, and works before anyone signs in. Starts with Windows.</div></div><label class="switch"><input type="checkbox" id="service"><span></span></label></div>
+    <div class="toggle" id="autostartRow"><div>Start with Windows (as admin, no UAC prompt)<div class="muted tiny">Uses Task Scheduler with highest privileges. Not needed in Service mode.</div></div><label class="switch"><input type="checkbox" id="autostart"><span></span></label></div>
+    <div class="toggle"><div>PC name<div class="muted tiny">Shown in the apps</div></div><input type="text" id="pcname" style="width:170px"></div>
+    <div class="toggle"><div>Default frame rate</div><select id="dfps"><option>30</option><option>60</option><option>90</option><option>120</option><option>144</option></select></div>
+    <div class="toggle"><div>Default bitrate (Mbps)</div><input type="number" id="dbr" min="1" max="150" style="width:90px"></div>
+    <div class="toggle"><div>Video encoder<div class="muted tiny">Auto picks NVIDIA → AMD → Intel → CPU</div></div>
+      <select id="encoder"><option value="auto">Auto</option><option value="h264_nvenc">NVIDIA NVENC</option><option value="h264_amf">AMD AMF</option><option value="h264_qsv">Intel Quick Sync</option><option value="libx264">CPU (x264)</option></select></div>
+    <div class="toggle"><div>Received files folder</div><input type="text" id="updir" style="width:220px"></div>
+    <div class="toggle"><div>Port<div class="muted tiny">Needs a restart. Forward this TCP port on your router for access from outside your home.</div></div><input type="number" id="port" min="1024" max="65535" style="width:100px"></div>
+    <div class="row" style="margin-top:10px"><button class="primary" id="saveSrv">Save</button><button id="fw">Re-add firewall rule</button><button id="fwPub">Allow on public networks</button></div>
+    <p class="tiny muted">Phone can't connect? Make sure both are on the same Wi-Fi and that Windows marks this network as <b>Private</b> (Settings → Network → Wi-Fi → your network).</p>
+  </section>
+
+  <section class="card wide">
+    <div class="row between"><h2>Log</h2><button id="logRefresh">Refresh</button></div>
+    <pre id="log"></pre>
+  </section>
+</main>
+<script>
+const key = new URLSearchParams(location.hash.slice(1)).get('k') || sessionStorage.k || '';
+sessionStorage.k = key;
+history.replaceState(null, '', '/');
+const $ = (s) => document.querySelector(s);
+const api = async (p, body) => {
+  const r = await fetch(p, { method: body ? 'POST' : 'GET', headers: { 'X-KD-Key': key, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+};
+let st = null, selUrl = 0, pinVisible = false, formLoaded = false;
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ago = (t) => { const s = (Date.now() - new Date(t)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : Math.floor(s / 86400) + ' d ago'; };
+
+async function refresh() {
+  try { st = await api('/admin/state'); } catch (e) { $('#sub').textContent = 'Not authorised — open the panel from the tray icon.'; return; }
+  $('#name').textContent = st.name;
+  $('#adminBadge').textContent = st.service ? 'Service · SYSTEM' : st.admin ? 'Administrator' : 'Not elevated';
+  $('#adminBadge').className = 'badge ' + (st.admin ? 'ok' : 'warn');
+  const paused = st.settings.paused;
+  $('#runBadge').textContent = paused ? 'Paused' : 'Running';
+  $('#runBadge').className = 'badge ' + (paused ? 'bad' : 'ok');
+  $('#pauseBtn').textContent = paused ? '▶ Resume sharing' : '⏸ Pause sharing';
+  $('#sub').textContent = `v${st.version} · port ${st.port} · desktop: ${st.desktop} · ${st.monitors.length} screen(s)`;
+  $('#pin').textContent = pinVisible ? st.pin : '••••••';
+  $('#pin').classList.toggle('hidden', !pinVisible);
+  $('#fp').textContent = st.fp;
+  const urls = $('#urls');
+  urls.innerHTML = st.urls.map((u, i) => `<div class="url ${i === selUrl ? 'on' : ''}" data-i="${i}"><code>${esc(u)}</code><span class="muted tiny">${i === selUrl ? 'QR ↓' : ''}</span></div>`).join('') || '<div class="empty">No network connection</div>';
+  urls.querySelectorAll('.url').forEach((el) => el.onclick = () => { selUrl = +el.dataset.i; refresh(); });
+  const u = st.urls[selUrl] || st.urls[0];
+  if (u && $('#qr').dataset.u !== u) { $('#qr').src = `/admin/qr.png?k=${key}&u=${encodeURIComponent(u)}`; $('#qr').dataset.u = u; }
+  $('#nViewers').textContent = st.clients ? st.clients.length : 0;
+  $('#sFps').textContent = st.clients && st.clients.length ? Math.round(st.fps) + ' fps' : 'idle';
+  $('#sKbps').textContent = st.clients && st.clients.length ? (st.kbps / 1000).toFixed(1) + ' Mbps' : '–';
+  $('#encInfo').textContent = `Encoder: ${st.encoder || 'detecting…'} · GPU: ${(st.monitors[0] || {}).gpu || '?'}` + (st.lastError ? ` · last ffmpeg message: ${st.lastError}` : '');
+  $('#clients').innerHTML = (st.clients || []).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="muted tiny">${esc(c.ip)} · since ${ago(c.since)}</div></td><td style="text-align:right"><button class="danger" data-kick="${c.id}">Disconnect</button></td></tr>`).join('') || '<tr><td class="empty">Nobody is connected</td></tr>';
+  $('#devices').innerHTML = st.devices.map((d) => `<tr><td><b>${esc(d.name)}</b><div class="muted tiny">last seen ${ago(d.lastSeen)} from ${esc(d.lastIP)}</div></td><td style="text-align:right"><button class="danger" data-rm="${d.id}">Forget</button></td></tr>`).join('') || '<tr><td class="empty">No remembered devices</td></tr>';
+  document.querySelectorAll('[data-kick]').forEach((b) => b.onclick = () => api('/admin/client/kick?id=' + b.dataset.kick).then(refresh));
+  document.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => confirm('Forget this device? It will need the PIN again.') && api('/admin/device/remove?id=' + b.dataset.rm).then(refresh));
+  document.querySelectorAll('[data-k]').forEach((cb) => cb.checked = !!st.settings[cb.dataset.k]);
+  $('#autostart').checked = st.autostart;
+  $('#service').checked = st.service;
+  $('#svcBadge').textContent = st.service ? 'active (SYSTEM)' : st.serviceInstalled ? 'installed, starting…' : 'off';
+  $('#svcBadge').className = 'badge ' + (st.service ? 'ok' : '');
+  $('#autostartRow').hidden = st.service;
+  if (!formLoaded) {
+    formLoaded = true;
+    $('#pcname').value = st.settings.name; $('#dfps').value = st.settings.defaultFps; $('#dbr').value = Math.round(st.settings.defaultBitrate / 1000);
+    $('#encoder').value = st.settings.encoder; $('#updir').value = st.settings.uploadDir; $('#port').value = st.settings.port;
+  }
+}
+document.querySelectorAll('[data-k]').forEach((cb) => cb.onchange = () => api('/admin/settings', { [cb.dataset.k]: cb.checked }).then(refresh));
+$('#pinShow').onclick = $('#pin').onclick = () => { pinVisible = !pinVisible; $('#pinShow').textContent = pinVisible ? 'Hide' : 'Show'; refresh(); };
+$('#pinNew').onclick = async () => { if (!confirm('Generate a new PIN? Remembered devices stay signed in.')) return; await api('/admin/pin', { pin: '' }); pinVisible = true; refresh(); };
+$('#pinSet').onclick = async () => { const p = prompt('New PIN (4–32 characters):'); if (!p) return; try { await api('/admin/pin', { pin: p }); pinVisible = true; refresh(); } catch (e) { alert(e.message); } };
+$('#pauseBtn').onclick = () => api('/admin/settings', { paused: !st.settings.paused }).then(refresh);
+$('#kickAll').onclick = () => api('/admin/kickall').then(refresh);
+$('#reprobe').onclick = () => api('/admin/reprobe').then(() => setTimeout(refresh, 1500));
+$('#service').onchange = async (e) => {
+  const on = e.target.checked;
+  const msg = on
+    ? 'Turn on Service mode?\n\nKadduDesk will be copied to Program Files and installed as a Windows service running as SYSTEM. Connected devices reconnect automatically in a few seconds. This page will reload.'
+    : 'Turn off Service mode?\n\nThe service is removed and KadduDesk stops. Start KadduDeskServer.exe again to use normal mode.';
+  if (!confirm(msg)) { e.target.checked = !on; return; }
+  try {
+    await api('/admin/service?on=' + (on ? 1 : 0));
+    document.body.insertAdjacentHTML('afterbegin', '<div style="padding:14px 28px;background:#3a2a20">' + (on ? 'Switching to Service mode… this page reconnects automatically.' : 'Service mode removed. KadduDesk has stopped.') + '</div>');
+    if (on) { let n = 0; const t = setInterval(async () => { n++; try { await api('/admin/state'); clearInterval(t); location.reload(); } catch (e) { if (n > 40) clearInterval(t); } }, 1000); }
+  } catch (er) { alert(er.message); e.target.checked = !on; }
+};
+$('#autostart').onchange = (e) => api('/admin/autostart?on=' + (e.target.checked ? 1 : 0)).then(refresh).catch((er) => { alert(er.message); refresh(); });
+$('#saveSrv').onclick = async () => {
+  try {
+    const oldPort = st.settings.port;
+    await api('/admin/settings', { name: $('#pcname').value, defaultFps: +$('#dfps').value, defaultBitrate: +$('#dbr').value * 1000, encoder: $('#encoder').value, uploadDir: $('#updir').value, port: +$('#port').value });
+    formLoaded = false; await refresh();
+    alert(+$('#port').value !== oldPort ? 'Saved. Restart the server for the new port to take effect.' : 'Saved.');
+  } catch (e) { alert(e.message); }
+};
+$('#fw').onclick = () => api('/admin/firewall').then(() => alert('Firewall rule added for private networks.')).catch((e) => alert(e.message));
+$('#fwPub').onclick = () => confirm('Allow connections on PUBLIC networks too (cafés, airports)? Only do this if you understand the risk; the PIN still protects access.') && api('/admin/firewall?public=1').then(() => alert('Allowed on all networks.')).catch((e) => alert(e.message));
+$('#quitBtn').onclick = () => confirm('Stop the KadduDesk server? Nobody will be able to connect until you start it again.') && api('/admin/quit').then(() => document.body.innerHTML = '<p style="padding:40px">Server stopped. You can close this tab.</p>');
+const loadLog = async () => { const r = await fetch('/admin/log', { headers: { 'X-KD-Key': key } }); $('#log').textContent = await r.text(); $('#log').scrollTop = 1e9; };
+$('#logRefresh').onclick = loadLog;
+refresh(); loadLog();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

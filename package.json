@@ -1,0 +1,33 @@
+{
+  "name": "kaddudesk",
+  "productName": "KadduDesk",
+  "version": "1.0.0",
+  "description": "Fast, low-latency remote desktop for your PC - control it from your phone or another computer.",
+  "main": "clients/windows/main.js",
+  "author": "Kabir Shinde",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable nsis"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.kaddudesk.client",
+    "productName": "KadduDesk",
+    "artifactName": "KadduDesk-${version}-${target}.${ext}",
+    "directories": { "output": "dist/electron" },
+    "files": ["clients/windows/**", "clients/launcher/**", "build/icon.ico", "package.json"],
+    "asar": true,
+    "win": { "icon": "build/icon.ico", "target": ["portable", "nsis"], "signAndEditExecutable": true },
+    "portable": { "artifactName": "KadduDesk-${version}-portable.exe" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "artifactName": "KadduDesk-${version}-setup.exe" },
+    "electronLanguages": ["en-US"]
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "electron@45.2.3": true
+  }
+}

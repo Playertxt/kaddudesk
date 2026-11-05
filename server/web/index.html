@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1115">
+<title>KadduDesk</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ login ============ -->
+<section id="login" class="screen" hidden>
+  <div class="card">
+    <img src="icon.png" class="logo" alt="">
+    <h1 id="loginTitle">KadduDesk</h1>
+    <p class="muted" id="loginSub">Enter the PIN shown on the PC's KadduDesk control panel.</p>
+    <form id="loginForm" autocomplete="off">
+      <input id="pin" type="password" inputmode="numeric" placeholder="PIN" maxlength="32" autofocus required>
+      <input id="devname" type="text" placeholder="This device's name" maxlength="60">
+      <label class="check"><input id="remember" type="checkbox" checked> Remember this device</label>
+      <button class="btn primary" id="loginBtn" type="submit">Connect</button>
+    </form>
+    <p class="err" id="loginErr"></p>
+    <p class="tiny muted">Certificate <span id="fpShow">…</span></p>
+    <button class="btn ghost small" id="loginHome" hidden>← Back to my PCs</button>
+  </div>
+</section>
+
+<!-- ============ unsupported ============ -->
+<section id="unsupported" class="screen" hidden>
+  <div class="card">
+    <img src="icon.png" class="logo" alt="">
+    <h1>Browser not supported</h1>
+    <p class="muted">KadduDesk needs WebCodecs hardware video decoding. Use the KadduDesk app, or a recent Chrome / Edge / Samsung Internet.</p>
+  </div>
+</section>
+
+<!-- ============ session ============ -->
+<section id="session" hidden>
+  <div id="stage">
+    <canvas id="screen"></canvas>
+    <div id="vcursor" hidden><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 2l16 9.5-7 1.6-3.6 6.9z" fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+  </div>
+
+  <div id="statusMsg" class="status"><div class="spinner"></div><span>Connecting…</span></div>
+  <div id="stats" hidden></div>
+
+  <!-- desktop: top tab; touch: draggable bubble -->
+  <div id="topTab" title="KadduDesk menu (Ctrl+Alt+Shift+M)"><span class="dot"></span>KadduDesk<span class="chev">▾</span></div>
+  <button id="bubble" aria-label="Menu"><img src="icon.png" alt=""></button>
+
+  <!-- mobile special keys -->
+  <div id="keybar" hidden>
+    <div class="row scroll">
+      <button data-mod="ControlLeft">Ctrl</button><button data-mod="AltLeft">Alt</button><button data-mod="ShiftLeft">Shift</button><button data-mod="MetaLeft">Win</button>
+      <button data-key="Escape">Esc</button><button data-key="Tab">Tab</button>
+      <button data-key="ArrowLeft">←</button><button data-key="ArrowUp">↑</button><button data-key="ArrowDown">↓</button><button data-key="ArrowRight">→</button>
+      <button data-key="Backspace">⌫</button><button data-key="Delete">Del</button><button data-key="Enter">⏎</button>
+      <button data-key="Home">Home</button><button data-key="End">End</button><button data-key="PageUp">PgUp</button><button data-key="PageDown">PgDn</button>
+      <button data-key="F1">F1</button><button data-key="F2">F2</button><button data-key="F3">F3</button><button data-key="F4">F4</button><button data-key="F5">F5</button><button data-key="F6">F6</button>
+      <button data-key="F7">F7</button><button data-key="F8">F8</button><button data-key="F9">F9</button><button data-key="F10">F10</button><button data-key="F11">F11</button><button data-key="F12">F12</button>
+      <button data-key="PrintScreen">PrtSc</button><button data-key="Insert">Ins</button>
+      <button id="kbHide" class="accent">⌨✕</button>
+    </div>
+  </div>
+  <textarea id="ime" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
+
+  <!-- the drawer -->
+  <div id="scrim" hidden></div>
+  <aside id="drawer" hidden>
+    <header>
+      <div>
+        <div class="title" id="pcName">PC</div>
+        <div class="tiny muted" id="pcInfo"></div>
+      </div>
+      <button class="icon-btn" id="drawerClose" aria-label="Close">✕</button>
+    </header>
+
+    <div class="quick">
+      <button class="qa" id="qaKeyboard"><i>⌨</i><span>Keyboard</span></button>
+      <button class="qa" id="qaAudio"><i>🔊</i><span>Sound</span></button>
+      <button class="qa" id="qaFull"><i>⛶</i><span>Fullscreen</span></button>
+      <button class="qa" id="qaStats"><i>📈</i><span>Stats</span></button>
+      <button class="qa" id="qaCad"><i>⌥</i><span>Ctrl+Alt+Del</span></button>
+      <button class="qa danger" id="qaDisconnect"><i>⏏</i><span>Disconnect</span></button>
+    </div>
+
+    <nav class="tabs">
+      <button data-tab="display" class="on">Display</button>
+      <button data-tab="input">Input</button>
+      <button data-tab="keys">Shortcuts</button>
+      <button data-tab="files">Files</button>
+      <button data-tab="clip">Clipboard</button>
+      <button data-tab="power">Power</button>
+    </nav>
+
+    <div class="tabpanes">
+      <!-- display -->
+      <div class="pane" data-pane="display">
+        <h3>Screen</h3>
+        <div class="seg" id="monitors"></div>
+        <h3>Quality</h3>
+        <div class="seg" id="presets">
+          <button data-preset="auto">Auto</button>
+          <button data-preset="speed">Fastest</button>
+          <button data-preset="balanced">Balanced</button>
+          <button data-preset="quality">Sharpest</button>
+          <button data-preset="custom">Custom</button>
+        </div>
+        <div id="custom">
+          <label class="field">Frame rate <b id="fpsVal"></b>
+            <input type="range" id="fps" min="15" max="144" step="1"></label>
+          <label class="field">Bitrate <b id="brVal"></b>
+            <input type="range" id="br" min="1" max="100" step="1"></label>
+          <label class="field">Resolution
+            <select id="res">
+              <option value="0">Native</option><option value="2160">2160p</option><option value="1440">1440p</option>
+              <option value="1080">1080p</option><option value="900">900p</option><option value="720">720p</option><option value="540">540p</option>
+            </select></label>
+        </div>
+        <h3>View</h3>
+        <div class="seg" id="fit">
+          <button data-fit="fit">Fit screen</button>
+          <button data-fit="fill">Fill</button>
+          <button data-fit="1:1">1:1 pixels</button>
+        </div>
+        <p class="tiny muted">Pinch with two fingers to zoom. Double-tap the menu bubble to reset zoom.</p>
+      </div>
+
+      <!-- input -->
+      <div class="pane" data-pane="input" hidden>
+        <h3>Touch mode</h3>
+        <div class="seg" id="tmode">
+          <button data-mode="trackpad">Trackpad</button>
+          <button data-mode="touch">Direct touch</button>
+        </div>
+        <div class="tiny muted help" id="modeHelp"></div>
+        <label class="field">Pointer speed <b id="spdVal"></b><input type="range" id="speed" min="0.3" max="3" step="0.1"></label>
+        <label class="check"><input type="checkbox" id="natural"> Natural (reverse) scrolling</label>
+        <label class="check"><input type="checkbox" id="relmouse"> Game mode: lock & capture mouse (relative)</label>
+        <label class="check"><input type="checkbox" id="haptics"> Vibrate on click</label>
+        <label class="check"><input type="checkbox" id="localCursor"> Show local cursor overlay</label>
+      </div>
+
+      <!-- shortcuts -->
+      <div class="pane" data-pane="keys" hidden>
+        <div class="grid keys">
+          <button data-combo="ControlLeft,AltLeft,Delete">Ctrl+Alt+Del</button>
+          <button data-combo="ControlLeft,ShiftLeft,Escape">Task Manager</button>
+          <button data-combo="MetaLeft">Start (Win)</button>
+          <button data-combo="AltLeft,Tab">Alt+Tab</button>
+          <button data-combo="AltLeft,F4">Alt+F4</button>
+          <button data-combo="MetaLeft,KeyD">Show desktop</button>
+          <button data-combo="MetaLeft,KeyE">Explorer</button>
+          <button data-combo="MetaLeft,KeyR">Run…</button>
+          <button data-combo="MetaLeft,KeyL">Lock (Win+L)</button>
+          <button data-combo="MetaLeft,Tab">Task view</button>
+          <button data-combo="MetaLeft,ShiftLeft,KeyS">Snip</button>
+          <button data-combo="PrintScreen">PrtSc</button>
+          <button data-combo="ControlLeft,KeyC">Copy</button>
+          <button data-combo="ControlLeft,KeyV">Paste</button>
+          <button data-combo="ControlLeft,KeyX">Cut</button>
+          <button data-combo="ControlLeft,KeyZ">Undo</button>
+          <button data-combo="ControlLeft,KeyA">Select all</button>
+          <button data-combo="ControlLeft,KeyS">Save</button>
+          <button data-combo="AudioVolumeDown">Vol −</button>
+          <button data-combo="AudioVolumeUp">Vol +</button>
+          <button data-combo="AudioVolumeMute">Mute</button>
+          <button data-combo="MediaPlayPause">Play/Pause</button>
+          <button data-combo="MediaTrackPrevious">⏮ Prev</button>
+          <button data-combo="MediaTrackNext">Next ⏭</button>
+        </div>
+        <h3>Type text on the PC</h3>
+        <div class="row gap">
+          <input id="typeText" type="text" placeholder="Text to type…">
+          <button class="btn" id="typeBtn">Type</button>
+        </div>
+      </div>
+
+      <!-- files -->
+      <div class="pane" data-pane="files" hidden>
+        <div class="row gap">
+          <button class="btn primary" id="uploadBtn">⬆ Send files to PC</button>
+          <input type="file" id="uploadInput" multiple hidden>
+        </div>
+        <div class="tiny muted" id="uploadDir"></div>
+        <div id="uploads"></div>
+        <h3>Browse PC <button class="link" id="filesRefresh">↻</button></h3>
+        <div class="crumbs" id="crumbs"></div>
+        <div class="files" id="fileList"></div>
+      </div>
+
+      <!-- clipboard -->
+      <div class="pane" data-pane="clip" hidden>
+        <label class="check"><input type="checkbox" id="clipAuto"> Sync clipboard automatically</label>
+        <h3>PC clipboard</h3>
+        <textarea id="clipText" rows="6" placeholder="Clipboard text appears here"></textarea>
+        <div class="row gap">
+          <button class="btn primary" id="clipSend">Send to PC</button>
+          <button class="btn" id="clipCopy">Copy to this device</button>
+        </div>
+      </div>
+
+      <!-- power -->
+      <div class="pane" data-pane="power" hidden>
+        <div class="grid power">
+          <button data-power="lock">🔒<span>Lock</span></button>
+          <button data-power="sleep">🌙<span>Sleep</span></button>
+          <button data-power="restart">🔄<span>Restart</span></button>
+          <button data-power="shutdown">⏻<span>Shut down</span></button>
+          <button data-power="signout">🚪<span>Sign out</span></button>
+          <button data-power="taskmgr">📊<span>Task Manager</span></button>
+          <button data-power="explorer">📁<span>Explorer</span></button>
+          <button data-power="cmd">⌨️<span>Terminal</span></button>
+          <button data-power="settings">⚙️<span>Settings</span></button>
+        </div>
+        <p class="tiny muted" id="wolInfo"></p>
+      </div>
+    </div>
+  </aside>
+
+  <div id="dropHint" hidden>Drop files to send them to the PC</div>
+  <div id="toast" hidden></div>
+  <dialog id="confirmDlg"><p id="confirmMsg"></p><div class="row gap end"><button class="btn" value="no" id="cNo">Cancel</button><button class="btn primary" id="cYes">OK</button></div></dialog>
+</section>
+
+<script src="bridge.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

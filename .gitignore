@@ -1,0 +1,23 @@
+# dependencies & downloads
+node_modules/
+third_party/
+
+# build output
+dist/
+build/android/
+server/bin/
+server/rsrc_windows_amd64.syso
+*.exe
+*.apk
+*.blockmap
+
+# secrets — NEVER commit (Android updates must be signed with this key; back it up privately)
+android/kaddudesk.keystore
+android/keystore.pass
+*.keystore
+*.jks
+
+# misc
+.DS_Store
+Thumbs.db
+*.log
