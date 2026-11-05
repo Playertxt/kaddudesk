@@ -1,6 +1,6 @@
 # KadduDesk ⚡
 
-**Fast, low-latency remote desktop for your Windows PC.** Control it from an Android phone, another Windows PC, or any modern browser. It works like Chrome Remote Desktop, but it encodes the screen on your GPU (NVENC / AMF / Quick Sync) and decodes it in hardware on the client. The result is noticeably snappier.
+**Fast, low-latency remote desktop for Windows and Linux.** Control your PC from an Android phone, a Windows or Linux PC, or any modern browser. It works like Chrome Remote Desktop, but it encodes the screen on your GPU (NVENC / AMF / Quick Sync) and decodes it in hardware on the client. The result is noticeably snappier.
 
 > *Kaddu* means pumpkin, hence the orange.
 
@@ -10,8 +10,10 @@
 1. [What you get](#1-what-you-get)
 2. [Quick start (5 minutes)](#2-quick-start-5-minutes)
 3. [Installing the server on your PC](#3-installing-the-server-on-your-pc)
+3b. [Installing the server on Linux](#3b-installing-the-server-on-linux)
 4. [Connecting from Android](#4-connecting-from-android)
 5. [Connecting from another Windows PC](#5-connecting-from-another-windows-pc)
+5b. [Connecting from Linux](#5b-connecting-from-linux)
 6. [Connecting from a browser](#6-connecting-from-a-browser)
 7. [Service mode: lock screen, UAC, Ctrl+Alt+Del](#7-service-mode-lock-screen-uac-ctrlaltdel)
 8. [Using it from outside your home](#8-using-it-from-outside-your-home)
@@ -35,6 +37,8 @@
 | `KadduDesk.apk` | Android 7.0+ | Phone/tablet client. |
 | `KadduDesk-1.0.0-setup.exe` | Windows 10/11 | Desktop client, installer. |
 | `KadduDesk-1.0.0-portable.exe` | Windows 10/11 | Desktop client, no install. |
+| `kaddudesk-server-linux-x64.tar.gz` / `-arm64` | Linux PC / Raspberry Pi to control | Host server + installer script. |
+| `kaddudesk-client-linux-x64.tar.gz` | Linux desktop | Desktop client + installer script. |
 | any browser | Chrome / Edge / Samsung Internet | Zero-install client at `https://<pc-ip>:47800/`. |
 
 **Feature list**
@@ -81,6 +85,50 @@
 
 Your Wi-Fi must be a **Private** network in Windows (Settings → Network & internet → Wi-Fi → *your network* → Network profile type: **Private**). Otherwise the firewall blocks phones. The control panel has an *Allow on public networks* button if you really need it.
 
+## 3b. Installing the server on Linux
+
+Works on Ubuntu/Debian, Fedora, Arch, openSUSE and others (x64 and ARM64, e.g. Raspberry Pi 4/5).
+
+1. Download `kaddudesk-server-linux-x64.tar.gz` (or `-arm64`) and unpack it:
+   ```bash
+   tar xzf kaddudesk-server-linux-x64.tar.gz && cd kaddudesk-server
+   ```
+2. Run the installer once:
+   ```bash
+   sudo ./install-linux.sh
+   ```
+   It:
+   - installs `ffmpeg`, `xclip`/`wl-clipboard`, `zenity`, `xdotool`
+   - copies the server to `/opt/kaddudesk`
+   - lets your desktop user create virtual mouse/keyboard devices (a `uinput` udev rule)
+   - opens ports 47800/tcp and 47810/udp in `ufw`/`firewalld`
+   - adds a menu entry and start-at-login
+   - optionally sets up **KMS capture** for Wayland (see below)
+3. **Log out and back in once** so the input permission applies.
+4. Start **KadduDesk Server** from your app menu, or run `kaddudesk-server`. The control panel opens in your browser with the PIN, the same as on Windows.
+
+**X11 vs Wayland**
+
+| Session | Screen capture | Notes |
+|---|---|---|
+| X11 / Xorg | `x11grab`, any GPU (NVIDIA NVENC, Intel/AMD VAAPI, or CPU) | Works out of the box, including the lock screen. |
+| Wayland (Ubuntu 22.04+ / Fedora default) | **KMS capture** + VAAPI | Answer **y** to "Enable KMS capture?" in the installer. Intel/AMD only. |
+| Wayland + NVIDIA | — | Pick **"Ubuntu on Xorg"** (gear icon on the login screen). |
+
+What's different from Windows:
+- Mouse and keyboard go through `/dev/uinput`, so they work on X11 and Wayland.
+- Characters outside US-ASCII are typed with `xdotool` (X11) or `wtype` (Wayland) if installed.
+- Sound is the PulseAudio/PipeWire monitor of your default output.
+- Clipboard sync needs `wl-clipboard` (Wayland) or `xclip` (X11).
+- The power menu uses `loginctl`/`systemctl`.
+- *Ask before connecting* needs `zenity` or `kdialog`.
+- Service mode and Ctrl+Alt+Del are Windows-only.
+
+Uninstall with:
+```bash
+sudo ./install-linux.sh --uninstall
+```
+
 ---
 
 ## 4. Connecting from Android
@@ -107,6 +155,22 @@ The Android back button closes panels and the keyboard first, then opens the men
   - **Fullscreen** (menu → ⛶) also captures Win, Alt+Tab and Esc for the remote PC.
   - Drag & drop files onto the window to send them to the PC.
   - Open the menu with the tab at the top centre, or **Ctrl+Alt+Shift+M**.
+
+## 5b. Connecting from Linux
+
+1. Download `kaddudesk-client-linux-x64.tar.gz` and unpack it:
+   ```bash
+   tar xzf kaddudesk-client-linux-x64.tar.gz && cd kaddudesk-client-linux-x64
+   ```
+2. Install it to the app menu (recommended; this also sets up Chromium's sandbox properly):
+   ```bash
+   sudo ./install-client.sh
+   ```
+   Or run it without installing:
+   ```bash
+   ./kaddudesk-client
+   ```
+3. It works the same as the Windows client: discovered PCs appear automatically, you trust the PC once, then enter the PIN.
 
 ---
 
@@ -304,7 +368,10 @@ cd kaddudesk && npm install
 ./build.sh all
 ```
 
-Targets: `./build.sh server | android | windows | all`. Output goes to `dist/`.
+Targets: `./build.sh server | linux | android | windows | linux-client | all`. Output goes to `dist/`.
+
+- **Linux server:** pure-Go cross-compile (`CGO_ENABLED=0`) for x64 and arm64, packaged with `linux/install-linux.sh`. On Linux it uses the system ffmpeg instead of an embedded one.
+- **Linux client:** electron-builder `dir` target, packaged as a tarball with `linux/client/` scripts. AppImage needs symlink rights, so it isn't built on Windows. To get an AppImage, run `npx electron-builder --linux AppImage` on a Linux machine.
 
 - **Server:** downloads the official FFmpeg build (BtbN, GPL) into `third_party/` on first build and embeds it. `EMBED_FFMPEG=0 ./build.sh server` builds a small exe that looks for `ffmpeg.exe` next to it instead. The admin manifest and icon are compiled by `tools/mkres`.
 - **Android:** assembled directly with aapt2 → javac → d8 → zipalign → apksigner. On the first build a signing key is created at `android/kaddudesk.keystore` (+ `keystore.pass`). These are **git-ignored. Back them up**: Android only installs updates signed with the same key.
@@ -364,7 +431,8 @@ server/                 Go host server
   media.go              ffmpeg control, encoder probing, RTP depacketizer, audio pipeline
   wasapi.go             system-audio loopback capture
   session.go            per-client WebSocket session, input dispatch, cursor/clipboard/desktop watchers
-  winapi.go keymap.go   SendInput, DXGI monitor enumeration, clipboard, power, scancode map
+  *_windows.go          Windows: SendInput, DXGI monitors, ddagrab/NVENC args, WASAPI, service mode
+  *_linux.go            Linux: uinput input, xrandr/DRM monitors, x11grab/kmsgrab + VAAPI/NVENC, PulseAudio, xclip/wl-clipboard
   web.go                HTTPS server, login, files, LAN discovery
   admin.go admin/       localhost control panel
   service.go proc.go    Service mode (SYSTEM service + agent), desktop-aware process launch
@@ -373,6 +441,7 @@ server/                 Go host server
 clients/launcher/       "My PCs" home screen shared by both apps
 clients/windows/        Electron shell: certificate pinning, discovery, Wake-on-LAN, clipboard
 android/                Android app (Java WebView + native bridge), no Gradle needed
+linux/                  Linux server installer, client launcher + installer
 tools/mkres/            writes the .syso (admin manifest + icon) for the server exe
 tools/make_icons.py     generates all icons
 build.sh                one-command build
@@ -382,6 +451,8 @@ build.sh                one-command build
 
 ## 17. Known limitations / roadmap
 
+- **The Linux server and client were cross-compiled on Windows but haven't been run on a real Linux desktop yet.** If something fails, run `kaddudesk-server -notray` in a terminal and check `~/.config/kaddudesk/server.log`.
+- On Linux the remote cursor shape isn't synced (you always see an arrow), and Wayland capture needs KMS (Intel/AMD).
 - **Service mode was not tested on real hardware before release.** If something misbehaves, check `C:\ProgramData\KadduDesk\service.log` and `server.log`, then turn Service mode off.
 - H.264 4:2:0 only, so very fine coloured text can look slightly soft. A 4:4:4 / AV1 option is planned.
 - Over the internet it's TCP only; a UDP/WebRTC transport for lossy mobile networks is planned.

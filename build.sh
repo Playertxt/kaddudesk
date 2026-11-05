@@ -3,7 +3,9 @@
 #   KadduDeskServer.exe   – host server (runs as admin; needs ffmpeg.exe next to it, or embedded)
 #   KadduDesk-*.exe       – Windows client (portable + installer)
 #   KadduDesk.apk         – Android client
-# Usage: ./build.sh [server|android|windows|all]   (run from Git Bash)
+#   kaddudesk-server-linux-*.tar.gz – Linux host server (x64, arm64) + installer
+#   KadduDesk-*.AppImage    – Linux client
+# Usage: ./build.sh [server|linux|android|windows|linux-client|all]   (run from Git Bash)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -42,6 +44,53 @@ build_server() {
   fi
   (cd server && go build $tags -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/KadduDeskServer.exe .)
   ls -la dist/KadduDeskServer.exe
+}
+
+build_linux() {
+  echo "== linux server"
+  for arch in amd64 arm64; do
+    local d="build/linux-$arch/kaddudesk-server"
+    rm -rf "build/linux-$arch"; mkdir -p "$d"
+    (cd server && GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "../$d/kaddudesk-server" .)
+    cp linux/install-linux.sh "$d/"
+    cp build/icon.png "$d/kaddudesk.png"
+    local name=$arch; [ "$arch" = amd64 ] && name=x64
+    python -c "
+import tarfile,sys,os
+src,out=sys.argv[1],sys.argv[2]
+with tarfile.open(out,'w:gz') as t:
+    for f in sorted(os.listdir(src)):
+        ti=t.gettarinfo(os.path.join(src,f),'kaddudesk-server/'+f)
+        ti.mode=0o755 if f.endswith(('.sh','server')) else 0o644
+        ti.uid=ti.gid=0; ti.uname=ti.gname='root'
+        t.addfile(ti,open(os.path.join(src,f),'rb'))
+" "$d" "dist/kaddudesk-server-linux-$name.tar.gz"
+  done
+  ls -la dist/kaddudesk-server-linux-*.tar.gz
+}
+
+build_linux_client() {
+  echo "== linux client"
+  # AppImage needs symlinks (not allowed on Windows without admin) -> package the app dir ourselves
+  npx electron-builder --linux dir --x64
+  cp linux/client/kaddudesk-client linux/client/install-client.sh dist/electron/linux-unpacked/
+  cp build/icon.png dist/electron/linux-unpacked/kaddudesk.png
+  python -c "
+import tarfile,sys,os
+src,out,root=sys.argv[1],sys.argv[2],'kaddudesk-client-linux-x64'
+exe={'kaddudesk','chrome_crashpad_handler','kaddudesk-client','install-client.sh','chrome-sandbox'}
+with tarfile.open(out,'w:gz') as t:
+    for dp,dn,fn in os.walk(src):
+        dn.sort()
+        for n in sorted(dn)+sorted(fn):
+            full=os.path.join(dp,n); rel=os.path.relpath(full,src).replace(os.sep,'/')
+            ti=t.gettarinfo(full,root+'/'+rel); ti.uid=ti.gid=0; ti.uname=ti.gname='root'
+            if ti.isdir(): ti.mode=0o755; t.addfile(ti)
+            else:
+                ti.mode=0o755 if (n in exe or n.endswith('.so') or '.so.' in n) else 0o644
+                t.addfile(ti,open(full,'rb'))
+" dist/electron/linux-unpacked dist/kaddudesk-client-linux-x64.tar.gz
+  ls -la dist/kaddudesk-client-linux-x64.tar.gz
 }
 
 build_android() {
@@ -90,8 +139,10 @@ build_windows() {
 sync_shared
 case "$WHAT" in
   server) build_server ;;
+  linux) build_linux ;;
+  linux-client) build_linux_client ;;
   android) build_android ;;
   windows) build_windows ;;
-  all) build_server; build_android; build_windows ;;
+  all) build_server; build_linux; build_android; build_windows; build_linux_client ;;
   *) echo "unknown target $WHAT"; exit 1 ;;
 esac

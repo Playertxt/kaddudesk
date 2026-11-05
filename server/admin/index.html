@@ -155,6 +155,9 @@ async function refresh() {
   $('#svcBadge').textContent = st.service ? 'active (SYSTEM)' : st.serviceInstalled ? 'installed, starting…' : 'off';
   $('#svcBadge').className = 'badge ' + (st.service ? 'ok' : '');
   $('#autostartRow').hidden = st.service;
+  const linux = st.platform === 'Linux';
+  $('#service').closest('.toggle').hidden = linux;
+  if (linux) $('#autostartRow > div').innerHTML = 'Start at login<div class="muted tiny">Adds KadduDesk to your desktop session autostart</div>';
   if (!formLoaded) {
     formLoaded = true;
     $('#pcname').value = st.settings.name; $('#dfps').value = st.settings.defaultFps; $('#dbr').value = Math.round(st.settings.defaultBitrate / 1000);

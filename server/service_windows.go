@@ -33,8 +33,6 @@ const (
 	sasEventName   = `Global\KadduDeskSAS`
 )
 
-var agentMode bool // true when running as the SYSTEM agent spawned by the service
-
 var (
 	wtsapi32          = windows.NewLazySystemDLL("wtsapi32.dll")
 	pWTSLogoffSession = wtsapi32.NewProc("WTSLogoffSession")

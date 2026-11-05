@@ -298,19 +298,6 @@ func getCursor() (string, int32, int32, bool) {
 
 // ---------------------------------------------------------------- monitors (DXGI)
 
-type Monitor struct {
-	Index   int    `json:"index"`
-	Name    string `json:"name"`
-	Adapter int    `json:"adapter"`
-	Output  int    `json:"output"`
-	X       int32  `json:"x"`
-	Y       int32  `json:"y"`
-	W       int32  `json:"w"`
-	H       int32  `json:"h"`
-	Primary bool   `json:"primary"`
-	GPU     string `json:"gpu"`
-}
-
 type rect struct{ L, T, R, B int32 }
 
 type dxgiOutputDesc struct {
@@ -526,3 +513,11 @@ func isAdmin() bool {
 	ok, err := windows.Token(0).IsMember(sid)
 	return err == nil && ok
 }
+
+// ---------------------------------------------------------------- platform-neutral input API
+
+func inputMoveAbs(x, y int32)   { sendInputs(mouseMoveAbs(x, y)) }
+func inputMoveRel(dx, dy int32) { sendInputs(mouseEv(dx, dy, 0, mMove)) }
+func inputButton(b int, d bool) { sendInputs(mouseButton(b, d)) }
+func inputWheel(dx, dy int32)   { sendInputs(mouseWheel(dx, dy)...) }
+func inputInit() error          { return nil }

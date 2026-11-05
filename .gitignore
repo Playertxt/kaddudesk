@@ -21,3 +21,6 @@ android/keystore.pass
 .DS_Store
 Thumbs.db
 *.log
+build/linux-*/
+*.tar.gz
+*.AppImage

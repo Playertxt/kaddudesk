@@ -1,10 +1,12 @@
 {
   "name": "kaddudesk",
   "productName": "KadduDesk",
+  "desktopName": "kaddudesk.desktop",
   "version": "1.0.0",
   "description": "Fast, low-latency remote desktop for your PC - control it from your phone or another computer.",
   "main": "clients/windows/main.js",
-  "author": "Kabir Shinde",
+  "author": { "name": "Kabir Shinde", "email": "kabirshinde90@gmail.com" },
+  "homepage": "https://github.com/Playertxt/kaddudesk",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -19,9 +21,10 @@
     "productName": "KadduDesk",
     "artifactName": "KadduDesk-${version}-${target}.${ext}",
     "directories": { "output": "dist/electron" },
-    "files": ["clients/windows/**", "clients/launcher/**", "build/icon.ico", "package.json"],
+    "files": ["clients/windows/**", "clients/launcher/**", "build/icon.ico", "build/icon.png", "package.json"],
     "asar": true,
     "win": { "icon": "build/icon.ico", "target": ["portable", "nsis"], "signAndEditExecutable": true },
+    "linux": { "icon": "build/icon.png", "target": ["dir"], "executableName": "kaddudesk", "category": "Network", "synopsis": "Fast remote desktop client", "artifactName": "KadduDesk-${version}-${arch}.${ext}" },
     "portable": { "artifactName": "KadduDesk-${version}-portable.exe" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "artifactName": "KadduDesk-${version}-setup.exe" },
     "electronLanguages": ["en-US"]

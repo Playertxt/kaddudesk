@@ -138,19 +138,19 @@ func doInput(fn func()) {
 // ------------------------------------------------------------ session
 
 type inMsg struct {
-	T   string   `json:"t"`
-	X   float64  `json:"x"`
-	Y   float64  `json:"y"`
-	DX  float64  `json:"dx"`
-	DY  float64  `json:"dy"`
-	B   int      `json:"b"`
-	D   bool     `json:"d"`
-	C   string   `json:"c"`
-	S   string   `json:"s"`
-	A   string   `json:"a"`
-	K   []string `json:"k"`
-	On  bool     `json:"on"`
-	TS  float64  `json:"ts"`
+	T   string    `json:"t"`
+	X   float64   `json:"x"`
+	Y   float64   `json:"y"`
+	DX  float64   `json:"dx"`
+	DY  float64   `json:"dy"`
+	B   int       `json:"b"`
+	D   bool      `json:"d"`
+	C   string    `json:"c"`
+	S   string    `json:"s"`
+	A   string    `json:"a"`
+	K   []string  `json:"k"`
+	On  bool      `json:"on"`
+	TS  float64   `json:"ts"`
 	Cfg *VideoCfg `json:"cfg"`
 }
 
@@ -358,26 +358,26 @@ func (c *Client) handle(m *inMsg) {
 		mon := c.monitorRect()
 		x := mon.X + int32(math.Round(clampF(m.X)*float64(mon.W-1)))
 		y := mon.Y + int32(math.Round(clampF(m.Y)*float64(mon.H-1)))
-		doInput(func() { sendInputs(mouseMoveAbs(x, y)) })
+		doInput(func() { inputMoveAbs(x, y) })
 	case "mr": // relative move (pointer lock / games)
 		if !ctl {
 			return
 		}
 		dx, dy := int32(m.DX), int32(m.DY)
-		doInput(func() { sendInputs(mouseEv(dx, dy, 0, mMove)) })
+		doInput(func() { inputMoveRel(dx, dy) })
 	case "mb":
 		if !ctl || m.B < 0 || m.B > 4 {
 			return
 		}
 		c.btnDown[m.B] = m.D
 		b, d := m.B, m.D
-		doInput(func() { sendInputs(mouseButton(b, d)) })
+		doInput(func() { inputButton(b, d) })
 	case "wh":
 		if !ctl {
 			return
 		}
 		dx, dy := int32(m.DX), int32(m.DY)
-		doInput(func() { sendInputs(mouseWheel(dx, dy)...) })
+		doInput(func() { inputWheel(dx, dy) })
 	case "k":
 		if !ctl {
 			return
@@ -449,7 +449,7 @@ func (c *Client) releaseAll() {
 		}
 		for b, d := range btns {
 			if d {
-				sendInputs(mouseButton(b, false))
+				inputButton(b, false)
 			}
 		}
 	})

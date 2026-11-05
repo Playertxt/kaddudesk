@@ -1,4 +1,4 @@
-//go:build embedffmpeg
+//go:build embedffmpeg && windows
 
 package main
 

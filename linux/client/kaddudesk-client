@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# KadduDesk client launcher. Uses Chromium's sandbox when it's set up (install-client.sh
+# does that); otherwise falls back to --no-sandbox so the app still starts on distros that
+# block unprivileged user namespaces (e.g. Ubuntu 24.04).
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SB="$HERE/chrome-sandbox"
+if [ -u "$SB" ] && [ "$(stat -c %u "$SB")" = "0" ]; then
+  exec "$HERE/kaddudesk" "$@"
+fi
+exec "$HERE/kaddudesk" --no-sandbox "$@"

@@ -45,7 +45,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 480, minHeight: 360,
     backgroundColor: '#0f1115', title: 'KadduDesk', autoHideMenuBar: true,
-    icon: path.join(__dirname, '..', '..', 'build', 'icon.ico'),
+    icon: path.join(__dirname, '..', '..', 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: false, spellcheck: false },
   });
   Menu.setApplicationMenu(null);

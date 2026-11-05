@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"golang.org/x/sys/windows"
 )
 
 //go:embed web
@@ -291,13 +290,7 @@ func handleFiles(w http.ResponseWriter, r *http.Request) {
 				ents = append(ents, fileEntry{Name: q, Path: fp, Dir: true})
 			}
 		}
-		mask, _ := windows.GetLogicalDrives()
-		for i := 0; i < 26; i++ {
-			if mask&(1<<i) != 0 {
-				d := fmt.Sprintf("%c:\\", 'A'+i)
-				ents = append(ents, fileEntry{Name: d, Path: d, Dir: true})
-			}
-		}
+		ents = append(ents, rootEntries()...)
 		writeJSON(w, 200, map[string]any{"path": "", "parent": "", "entries": ents, "uploadDir": uploadDir()})
 		return
 	}
