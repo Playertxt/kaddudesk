@@ -17,7 +17,7 @@ const PRESETS = {
 };
 let S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.kd_settings || '{}')); } catch (e) {}
-const save = () => { try { localStorage.kd_settings = JSON.stringify(S); } catch (e) {} };
+const save = () => { if (embedMode === 'thumb') return; try { localStorage.kd_settings = JSON.stringify(S); } catch (e) {} };
 
 // When opened through a hub the app lives under /d/<id>/ — all URLs are relative to BASE,
 // and the saved login is kept per device.
@@ -25,6 +25,10 @@ const BASE = location.pathname.replace(/[^/]*$/, '');
 const VIA_HUB = BASE !== '/';
 const TOK = VIA_HUB ? 'kd_token:' + BASE : 'kd_token';
 let token = localStorage[TOK] || sessionStorage[TOK] || '';
+// Embedded in the hub's multi-device view: 'thumb' (small, cheap, silent) or 'main' (full control)
+const EMBED = new URLSearchParams(location.search).get('embed');
+let embedMode = EMBED;
+if (EMBED) document.documentElement.classList.add('embed', EMBED === 'thumb' ? 'thumb' : 'main');
 
 // ------------------------------------------------------------------ helpers
 let toastT;
@@ -58,11 +62,9 @@ async function boot() {
     $('#fpShow').textContent = info.fp.match(/.{4}/g).slice(0, 4).join(' ');
     document.title = info.name + ' · KadduDesk';
   } catch (e) {}
-  if (token) {
-    const r = await fetch(BASE + 'api/check', { headers: authHdr() }).catch(() => null);
-    if (r && r.ok) return startSession();
-    token = ''; delete localStorage[TOK];
-  }
+  const r = await fetch(BASE + 'api/check', { headers: token ? authHdr() : {} }).catch(() => null);
+  if (r && r.ok) return startSession();
+  if (token) { token = ''; delete localStorage[TOK]; }
   showLogin();
 }
 
@@ -143,6 +145,7 @@ function connect() {
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 
 function sendCfg() {
+  if (embedMode === 'thumb') { send({ t: 'cfg', cfg: { monitor: S.monitor | 0, fps: 10, bitrate: 800, maxHeight: 360 } }); return; }
   const p = PRESETS[S.preset] || {};
   const cfg = {
     monitor: S.monitor | 0,
@@ -164,7 +167,7 @@ function onCtl(m) {
       saveHostMeta(m);
       if (!m.features.control) toast('View-only: the PC owner disabled remote control');
       sendCfg();
-      if (S.audio && m.features.audio) startAudio();
+      if (S.audio && m.features.audio && embedMode !== 'thumb') startAudio();
       if (S.clipAuto) pushLocalClipboard();
       break;
     case 'cfg': serverCfg = m.cfg; break;
@@ -278,7 +281,7 @@ const auto = {
   queueDelay() { const a = [...this.samples].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length * 0.5)] : 0; },
   congestion() { if (S.preset === 'auto') this.adjust(0.6, true); },
   tick() {
-    if (S.preset !== 'auto' || !ws) return;
+    if (S.preset !== 'auto' || !ws || embedMode === 'thumb') return;
     const q = this.queueDelay(), now = performance.now();
     if (q > 45) { this.goodSince = 0; this.adjust(0.7); }
     else if (q < 12) { if (!this.goodSince) this.goodSince = now; if (now - this.goodSince > 8000) { this.goodSince = now; this.adjust(1.2); } }
@@ -896,7 +899,23 @@ async function toggleFullscreen() {
 }
 document.addEventListener('fullscreenchange', () => { syncUI(); layout(); });
 
+function setEmbedMode(m) {
+  if (!EMBED || (m !== 'thumb' && m !== 'main') || m === embedMode) return;
+  embedMode = m;
+  document.documentElement.classList.toggle('thumb', m === 'thumb');
+  document.documentElement.classList.toggle('main', m === 'main');
+  sendCfg();
+  if (m === 'thumb') { stopAudio(); toggleDrawer(false); send({ t: 'release' }); }
+  else { if (S.audio && hello && hello.features.audio) startAudio(); canvas.focus({ preventScroll: true }); }
+  layout();
+}
+if (EMBED) {
+  window.addEventListener('message', (e) => { if (e.origin === location.origin && e.data && e.data.kd === 'mode') setEmbedMode(e.data.mode); });
+  try { parent.postMessage({ kd: 'ready' }, location.origin); } catch (e) {}
+}
+
 function goHome() {
+  if (EMBED) { try { parent.postMessage({ kd: 'closed' }, location.origin); } catch (e) {} return; }
   if (VIA_HUB) { location.href = '../../'; return; } // back to the hub's device list
   if (KD.home) return KD.home();
   location.reload();

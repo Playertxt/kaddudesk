@@ -9,132 +9,71 @@
 <link rel="stylesheet" href="style.css">
 <style>
   body { overflow: auto; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: calc(18px + var(--safe-t)) 16px calc(30px + var(--safe-b)); }
-  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-  .top img { width: 44px; height: 44px; border-radius: 12px; }
-  .top h1 { margin: 0; font-size: 21px; }
-  .top .sub { color: var(--muted); font-size: 13px; }
-  .top .sp { flex: 1; }
-  .search { max-width: 260px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-  .dev { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; cursor: pointer; transition: border-color .15s, transform .1s; }
-  .dev:hover { border-color: rgba(255,138,42,.55); }
-  .dev:active { transform: scale(.99); }
-  .dev.off { opacity: .55; cursor: default; }
-  .dev .row1 { display: flex; gap: 12px; align-items: center; }
-  .dev .ic { width: 44px; height: 44px; border-radius: 12px; background: #232733; display: grid; place-items: center; font-size: 22px; position: relative; flex: 0 0 auto; }
-  .dev .ic i { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--panel-solid); background: #555; }
-  .dev .ic i.on { background: var(--ok); }
-  .dev b { display: block; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dev .meta { min-width: 0; }
-  .dev .id { font: 600 13px ui-monospace, Consolas, monospace; color: var(--accent); letter-spacing: .05em; }
-  .dev .tiny { color: var(--muted); }
-  .dev .acts { display: flex; gap: 6px; }
-  .dev .acts .btn { flex: 1; padding: 7px 8px; font-size: 13px; }
-  .badge { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #232733; border: 1px solid var(--line); color: var(--muted); margin-left: 4px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: calc(16px + var(--safe-t)) 16px calc(30px + var(--safe-b)); }
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .top img { width: 40px; height: 40px; border-radius: 11px; }
+  .top h1 { margin: 0; font-size: 20px; }
+  .top .sub { color: var(--muted); font-size: 12.5px; }
+  .sp { flex: 1; }
+  .nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .nav button { background: #1c1f27; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-weight: 600; color: var(--muted); }
+  .nav button.on { color: var(--text); border-color: var(--accent); background: rgba(255,138,42,.12); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .tile.click { cursor: pointer; } .tile.click:hover { border-color: rgba(255,138,42,.55); }
+  .tile.off { opacity: .55; }
+  .row1 { display: flex; gap: 12px; align-items: center; }
+  .ic { width: 42px; height: 42px; border-radius: 12px; background: #232733; display: grid; place-items: center; font-size: 21px; position: relative; flex: 0 0 auto; }
+  .ic i { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--panel-solid); background: #555; }
+  .ic i.on { background: var(--ok); }
+  .tile b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { min-width: 0; flex: 1; }
+  .idt { font: 600 12.5px ui-monospace, Consolas, monospace; color: var(--accent); letter-spacing: .05em; }
+  .acts { display: flex; gap: 6px; flex-wrap: wrap; } .acts .btn { flex: 1; padding: 7px 8px; font-size: 13px; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #232733; border: 1px solid var(--line); color: var(--muted); margin-left: 4px; font-weight: 600; }
+  .badge.ok { color: var(--ok); } .badge.warn { color: #ffcc4d; } .badge.bad { color: var(--danger); }
   .empty { color: var(--muted); padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: 16px; grid-column: 1 / -1; line-height: 1.7; }
-  #toast { bottom: calc(24px + var(--safe-b)); }
+  .panel { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-bottom: 14px; }
+  .panel h2 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } td, th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; } th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  .form { display: grid; gap: 10px; max-width: 420px; }
+  .inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; } .inline input, .inline select { width: auto; flex: 1; min-width: 140px; }
+  .codes { font: 600 15px/1.9 ui-monospace, Consolas, monospace; background: #0c0e12; border-radius: 12px; padding: 12px 16px; columns: 2; }
+  .qr { background: #fff; border-radius: 12px; padding: 8px; width: 200px; height: 200px; }
+  .mono { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+  .chk { display: flex; gap: 8px; align-items: center; padding: 6px 0; }
+  .card.wide { width: min(460px, 100%); }
+  .card .form { margin: 16px auto 0; text-align: left; }
+  /* ---- multi-device view ---- */
+  #multi { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; z-index: 50; }
+  #multi .bar { display: flex; gap: 8px; align-items: center; padding: 8px 10px calc(8px) calc(10px); padding-top: calc(8px + var(--safe-t)); background: #111319; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #multi .bar b { font-size: 15px; }
+  #wall { flex: 1; display: grid; gap: 8px; padding: 8px; overflow: auto; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  #wall .cell { position: relative; aspect-ratio: 16 / 9; background: #0b0c10; border: 2px solid #1d2029; border-radius: 10px; overflow: hidden; }
+  #wall .cell:hover { border-color: rgba(255,138,42,.6); }
+  #wall.focus { grid-template-columns: 1fr 240px; grid-auto-rows: min-content; }
+  #wall.focus .cell.main { grid-column: 1; grid-row: 1 / span 40; aspect-ratio: auto; height: calc(100vh - 70px - var(--safe-t)); border-color: var(--accent); }
+  #wall.focus .cell:not(.main) { grid-column: 2; }
+  #wall .cell iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+  #wall .cell .cover { position: absolute; inset: 0; cursor: pointer; z-index: 2; }
+  #wall .cell.main .cover { display: none; }
+  #wall .cell .label { position: absolute; left: 6px; bottom: 6px; z-index: 3; background: rgba(0,0,0,.75); border-radius: 8px; padding: 3px 8px; font-size: 12px; font-weight: 600; pointer-events: none; max-width: calc(100% - 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #wall .cell .label .idt { font-size: 11px; margin-left: 6px; }
+  #wall.focus .cell.main .label { display: none; }
+  @media (max-width: 760px) {
+    #wall { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    #wall.focus { grid-template-columns: repeat(3, 1fr); }
+    #wall.focus .cell.main { grid-column: 1 / -1; grid-row: 1; height: auto; aspect-ratio: 16 / 10; }
+    #wall.focus .cell:not(.main) { grid-column: auto; }
+  }
 </style>
 </head>
 <body>
-<section id="login" class="screen" hidden>
-  <div class="card">
-    <img src="icon.png" class="logo" alt="">
-    <h1 id="lTitle">KadduDesk Hub</h1>
-    <p class="muted">Enter the hub password (shown in the control panel on the hub PC).</p>
-    <form id="lForm" autocomplete="off">
-      <input id="pw" type="password" placeholder="Hub password" required autofocus>
-      <input id="dev" type="text" placeholder="This device's name" maxlength="60">
-      <label class="check"><input id="rem" type="checkbox" checked> Remember this device</label>
-      <button class="btn primary" id="lBtn">Open hub</button>
-    </form>
-    <p class="err" id="lErr"></p>
-    <button class="btn ghost small" id="lHome" hidden>← Back to my PCs</button>
-  </div>
-</section>
-
-<div class="wrap" id="main" hidden>
-  <div class="top">
-    <img src="icon.png" alt="">
-    <div><h1 id="hubName">Hub</h1><div class="sub">All your devices · pick one to control it</div></div>
-    <div class="sp"></div>
-    <input class="search" id="q" placeholder="Search name or ID…">
-    <button class="btn small" id="home" hidden>My PCs</button>
-    <button class="btn small ghost" id="logout">Log out</button>
-  </div>
-  <div class="grid" id="grid"></div>
-</div>
+<div id="app"></div>
 <div id="toast" hidden></div>
-
 <script src="bridge.js"></script>
-<script>
-'use strict';
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const osIcon = (os) => /linux/i.test(os) ? '🐧' : /android/i.test(os) ? '📱' : '🖥';
-const ago = (t) => { if (!t) return ''; const s = (Date.now() - new Date(t)) / 1000; return s < 90 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : Math.floor(s / 86400) + ' d ago'; };
-let toastT; const toast = (m) => { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); };
-let devices = [];
-if (KD.kind !== 'browser') { $('#lHome').hidden = false; $('#home').hidden = false; }
-$('#lHome').onclick = $('#home').onclick = () => KD.home && KD.home();
-
-async function load() {
-  const r = await fetch('hub/api/devices', { cache: 'no-store' }).catch(() => null);
-  if (!r) { toast('Hub unreachable'); return; }
-  if (r.status === 401) { $('#main').hidden = true; $('#login').hidden = false; return; }
-  const j = await r.json();
-  $('#login').hidden = true; $('#main').hidden = false;
-  $('#hubName').textContent = j.hub + ' · Hub';
-  document.title = j.hub + ' · KadduDesk Hub';
-  devices = j.devices;
-  render();
-}
-
-function render() {
-  const q = $('#q').value.trim().toLowerCase().replace(/\s/g, '');
-  const list = devices.filter((d) => !q || d.name.toLowerCase().includes(q) || d.id.includes(q));
-  const g = $('#grid');
-  if (!list.length) { g.innerHTML = `<div class="empty">${q ? 'No match.' : 'No devices yet.<br>On each PC, open the KadduDesk control panel → <b>Join a hub</b> and enter this hub\'s address and host key.'}</div>`; return; }
-  g.innerHTML = '';
-  for (const d of list) {
-    const el = document.createElement('div');
-    el.className = 'dev' + (d.online ? '' : ' off');
-    el.innerHTML = `<div class="row1"><div class="ic">${osIcon(d.os)}<i class="${d.online ? 'on' : ''}"></i></div>
-      <div class="meta"><b>${esc(d.name)}${d.self ? '<span class="badge">hub</span>' : ''}</b><div class="id">${esc(d.pretty)}</div>
-      <div class="tiny">${esc(d.os || '')}${d.online ? '' : ' · offline ' + ago(d.lastSeen)}</div></div></div>
-      <div class="acts">${d.online ? '<button class="btn primary" data-a="go">Connect</button>' : ''}${!d.online && d.wake ? '<button class="btn" data-a="wake">⏰ Wake</button>' : ''}</div>`;
-    const go = () => { location.href = 'd/' + d.id + '/'; };
-    if (d.online) el.onclick = (e) => { if (!e.target.closest('[data-a=wake]')) go(); };
-    const w = el.querySelector('[data-a=wake]');
-    if (w) w.onclick = async (e) => {
-      e.stopPropagation();
-      const r = await fetch('hub/api/wake?id=' + d.id, { method: 'POST' });
-      toast(r.ok ? 'Wake-on-LAN sent from the hub to ' + d.name : 'Wake failed');
-    };
-    g.appendChild(el);
-  }
-}
-
-$('#q').oninput = render;
-$('#logout').onclick = async () => { await fetch('hub/api/logout', { method: 'POST' }); location.reload(); };
-$('#lForm').onsubmit = async (e) => {
-  e.preventDefault();
-  $('#lErr').textContent = '';
-  localStorage.kd_devname = $('#dev').value;
-  const r = await fetch('hub/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: $('#pw').value, remember: $('#rem').checked, device: $('#dev').value }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { $('#lErr').textContent = j.error || 'Login failed'; return; }
-  $('#pw').value = '';
-  load();
-};
-(async () => {
-  $('#dev').value = localStorage.kd_devname || (KD.deviceName ? await KD.deviceName() : '') || '';
-  try { const i = await (await fetch('api/info')).json(); $('#lTitle').textContent = i.name + ' · Hub'; } catch (e) {}
-  load();
-  setInterval(() => { if (!$('#main').hidden) load(); }, 4000);
-})();
-window.kdBack = () => false;
-</script>
+<script src="hub.js"></script>
 </body>
 </html>

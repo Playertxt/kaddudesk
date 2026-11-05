@@ -61,6 +61,8 @@ type Config struct {
 	HubAddr string `json:"hubAddr"`
 	HubKey  string `json:"hubKey"`
 	HubFP   string `json:"hubFp"`
+	// DenyHubUsers: ignore hub accounts and always ask for this PC's PIN
+	DenyHubUsers bool `json:"denyHubUsers"`
 }
 
 var (

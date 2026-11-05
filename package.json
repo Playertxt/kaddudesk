@@ -2,7 +2,7 @@
   "name": "kaddudesk",
   "productName": "KadduDesk",
   "desktopName": "kaddudesk.desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Fast, low-latency remote desktop for your PC - control it from your phone or another computer.",
   "main": "clients/windows/main.js",
   "author": { "name": "Kabir Shinde", "email": "kabirshinde90@gmail.com" },

@@ -36,8 +36,8 @@
 |---|---|---|
 | `KadduDeskServer.exe` | The PC you want to control (Windows 10/11, 64-bit) | Host server. Single file with ffmpeg embedded. Asks for admin rights. Lives in the system tray. |
 | `KadduDesk.apk` | Android 7.0+ | Phone/tablet client. |
-| `KadduDesk-1.1.0-setup.exe` | Windows 10/11 | Desktop client, installer. |
-| `KadduDesk-1.1.0-portable.exe` | Windows 10/11 | Desktop client, no install. |
+| `KadduDesk-1.2.0-setup.exe` | Windows 10/11 | Desktop client, installer. |
+| `KadduDesk-1.2.0-portable.exe` | Windows 10/11 | Desktop client, no install. |
 | `kaddudesk-server-linux-x64.tar.gz` / `-arm64` | Linux PC / Raspberry Pi to control | Host server + installer script. |
 | `kaddudesk-client-linux-x64.tar.gz` | Linux desktop | Desktop client + installer script. |
 | any browser | Chrome / Edge / Samsung Internet | Zero-install client at `https://<pc-ip>:47800/`. |
@@ -54,6 +54,8 @@
 - PIN login, remembered devices, per-device revoke, kick, pause sharing, optional "ask me first" prompt
 - **Service mode**: control the lock screen, sign-in screen and UAC prompts; works before anyone signs in
 - **Hub (AnyDesk-style)**: your main PC relays for all your devices; 9-digit device IDs; control any of them from anywhere; one port to forward
+- **Workspaces**: group devices, watch them all live at once, click one to take control; per-person *view only* / *full control*
+- **Accounts with strong security**: Argon2id passwords, mandatory 2FA (authenticator app + recovery codes), lockout, session management, audit log
 - **Phone-first touch**: trackpad mode or direct-touch mode, pinch-zoom, sticky Ctrl/Alt/Shift/Win key bar, haptics
 - LAN auto-discovery (PCs just appear), Wake-on-LAN, power menu (lock / sleep / restart / shut down / sign out)
 - Live stats overlay (latency, ping, decode time, fps, bitrate), Auto quality, game mode (pointer lock)
@@ -150,7 +152,7 @@ The Android back button closes panels and the keyboard first, then opens the men
 
 ## 5. Connecting from another Windows PC
 
-- Install `KadduDesk-1.1.0-setup.exe`, or just run `KadduDesk-1.1.0-portable.exe`.
+- Install `KadduDesk-1.2.0-setup.exe`, or just run `KadduDesk-1.2.0-portable.exe`.
 - Same flow as Android: discovered PCs show up automatically, or add one by IP. Then trust, then PIN.
 - Tips:
   - Your local mouse pointer **is** the remote pointer, with the shape synced live, so movement has zero lag.
@@ -217,35 +219,54 @@ Apps opened from the power menu (Task Manager, Explorer, Terminal, Settings) sta
 
 ## 7b. Hub: control any device from any device (AnyDesk-style)
 
-Make **your main PC the hub**. Every other computer (Windows or Linux) *joins* it and keeps an outbound connection to it, so it's reachable from anywhere, even behind another router or on mobile data. Each device gets a 9-digit **device ID** like AnyDesk. Any phone or computer that opens the hub sees all your devices and can control any of them. **All traffic is relayed through the main PC**, so the load sits there.
+Make **your main PC the hub**. Every other computer (Windows or Linux) *joins* it and keeps an outbound connection to it, so it's reachable from anywhere, even behind another router or on mobile data. Each device gets a 9-digit **device ID** like AnyDesk. People **sign in to the hub with their own account** (password + two-factor code). They see the devices you've shared with them, grouped into **workspaces**, and can watch them all at once and take control of any one. **All traffic is relayed through the main PC**, so the load sits there.
 
 ```
   phone / laptop / browser ──► HUB (main PC, port 47820) ◄── PC #2 (joined, outbound)
-                                     ▲          ▲
-                                     │          └──── Linux box (joined, outbound)
-                                     └─ the main PC itself is a device too
+         signs in: password + 2FA     ▲          ▲
+                                      │          └──── Linux box (joined, outbound)
+                                      └─ the main PC itself is a device too
 ```
 
-**1. On the main PC (the hub)**
-1. Open the control panel → **Hub** card → turn on **Be the hub**.
-2. Note the **Hub password** (for people) and the **Host key** (for PCs that join). Click *Show*; you can change both.
-3. For access from outside your home, forward **TCP 47820** on your router to the main PC, or use Tailscale. That's the only port you need; other PCs don't need any port forwarding.
+### Set up the hub (main PC)
+1. Control panel → **Hub** card → turn on **Be the hub**.
+2. In the same card, **create the owner account** (username + strong password). For security this can only be done on the hub PC itself.
+3. Open the hub (`https://<hub-address>:47820/`, or **Open hub** in the app) and sign in. You'll be asked to **set up two-factor authentication**: scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…) and **save the 10 recovery codes** somewhere safe.
+4. Note the **Host key** in the Hub card. Other PCs need it to join.
+5. For access from outside your home, forward **TCP 47820** on your router to the main PC, or use Tailscale. That's the only port you need.
 
-**2. On every other PC**
-1. Install and run KadduDesk Server (Windows `.exe`, or the Linux package).
-2. Control panel → **Join a hub** → enter the hub address (e.g. `192.168.1.10`, `my-home.example.com` or a Tailscale IP; port 47820 is the default) and the **host key** → **Join hub**.
-3. Compare the fingerprint it shows with the main PC's certificate fingerprint and confirm. The card turns **connected**, and the PC shows up on the hub with its ID.
+### Join your other PCs
+1. Install and run KadduDesk Server on each PC (Windows `.exe` or the Linux package).
+2. Control panel → **Join a hub** → hub address (e.g. `192.168.1.10`, `my-home.example.com` or a Tailscale IP) + **host key** → **Join hub**, and confirm the fingerprint matches the hub's.
+3. Leave **"Let hub accounts connect without this PC's PIN"** on, so signed-in hub users with access don't need each PC's PIN. Turn it off to always require this PC's own PIN as well.
 
-**3. Connect from anywhere**
-- In the **KadduDesk app** (Android / Windows / Linux), the hub appears under *Nearby* as **🌐 … · Hub** on the same network. You can also add it by address with port **47820**. Tap **Open hub**, enter the hub password once, then pick a device.
-- In a **browser**: open `https://<hub-address>:47820/`.
-- Each device still asks for **its own PIN** the first time (with *Remember this device* you won't be asked again). Knowing the hub password alone doesn't give control.
-- **⏰ Wake** on an offline device sends Wake-on-LAN *from the hub's network*, so you can wake a sleeping home PC from your phone on mobile data.
+### Workspaces: watch many devices, control any one
+- **Workspaces** tab → *Create workspace* (owner/admins) (e.g. "Home", "Office"). Tick the devices it contains, and pick who can use it: **Full control** or **View only**.
+- **Open** a workspace and every online device in it streams live in a grid. Thumbnails run at 10 fps / 360p to save bandwidth.
+- **Click any screen** to take control. It becomes the big view at full quality, with sound and keyboard focus. The others keep updating on the side. Click another screen to switch instantly, or **▦ All screens** to go back to the wall.
+- **All devices** lists every device you can access, with search by name or ID, **Connect** (single full-screen session) and **⏰ Wake** (Wake-on-LAN sent from the hub's network).
 
-**Security**
-- Device ↔ hub uses TLS with the hub's certificate **pinned** on each device. Devices need the host key to join; regenerating it disconnects every device until it re-joins.
-- Client ↔ hub uses TLS with the hub pinned in the apps, a hub password (brute-force limited) and an HttpOnly cookie. Then the device's own PIN or remembered-device token is checked on the device itself.
-- The hub sees relayed traffic (it terminates TLS), so run it on a PC you trust: your own main PC.
+### People and permissions
+| Role | Can do |
+|---|---|
+| **Owner** (first account) | Everything, including the security policy and making admins |
+| **Admin** | Manage members and workspaces; use every device |
+| **Member** | Only the devices in workspaces they're added to, with *view only* or *full control* per workspace |
+
+**Administration → Users → Add a person** creates an account with a temporary password (use **Generate**). Share it privately. At first sign-in they must choose their own password and set up 2FA. From the same list you can reset a password, reset 2FA (lost phone), unlock, disable or delete an account.
+
+### Login security
+- **Passwords:** hashed with **Argon2id** (64 MiB, 3 passes). Minimum 10 characters, mixing 3 character types (or 16+ characters). Common passwords and ones containing the username are rejected.
+- **Two-factor authentication:** TOTP (RFC 6238) from any authenticator app, **required for everyone by default**. Used codes can't be replayed. 10 single-use recovery codes are stored only as hashes.
+- **Brute-force protection:** after 5 failures the account locks, for 15 min at first and doubling up to 24 h. The network address is also locked. Errors never reveal whether a username exists.
+- **Sessions:** random 256-bit token in a `__Host-` cookie that is HttpOnly, Secure and SameSite=Strict. The server stores only its hash. Sessions sign out after inactivity (default 60 min), or last up to 30 days with *Keep me signed in*. **Account & security** lists your sessions and can sign them out remotely; changing your password signs out every other session.
+- **CSRF protection** on every change, a strict Content-Security-Policy on the hub pages, and HSTS / no-referrer / frame protections.
+- **Device trust:** devices accept a hub user only over their authenticated, certificate-pinned hub tunnel. The same headers on a direct connection are ignored. View-only users can't send input, files, clipboard or power commands; the device itself enforces this.
+- **Audit log** (Administration → Audit log): every sign-in, failure, lockout, 2FA change, user/workspace change and device session, with time and IP.
+- **Locked out?** On the hub PC: control panel → Hub → **Recover…** resets that account's password and 2FA. This only works on the hub PC itself.
+- The owner can change the policy under **Administration → Security policy**: require 2FA, inactivity timeout, keep-signed-in length.
+
+The hub terminates TLS and relays the traffic, so run it on a PC you trust: your own main PC.
 
 ---
 

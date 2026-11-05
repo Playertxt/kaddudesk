@@ -23,7 +23,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func clientIP(r *http.Request) string {
 	if r.Context().Value(viaTunnelKey) != nil { // relayed by our hub: it tells us who the client is
@@ -52,8 +52,44 @@ func reqToken(r *http.Request) string {
 	return r.URL.Query().Get("token")
 }
 
+// hubIdentity is a hub account that the hub has already authenticated (password + 2FA)
+// and authorised for this device.
+type hubIdentity struct{ name, perm string }
+
+const hubIdentKey ctxKey = 2
+
+// hubUserFrom trusts the hub's identity only (a) in-process on the hub PC itself, or
+// (b) on requests that arrived through our authenticated hub tunnel. Direct connections
+// can never set these headers.
+func hubUserFrom(r *http.Request) *hubIdentity {
+	if getConfig().DenyHubUsers {
+		return nil
+	}
+	if id, ok := r.Context().Value(hubIdentKey).(*hubIdentity); ok {
+		return id
+	}
+	if r.Context().Value(viaTunnelKey) != nil {
+		if n := r.Header.Get("X-KD-Hub-User"); n != "" {
+			p := r.Header.Get("X-KD-Hub-Perm")
+			if p != "view" {
+				p = "control"
+			}
+			return &hubIdentity{name: n, perm: p}
+		}
+	}
+	return nil
+}
+
 func authed(r *http.Request) (devID, name string, ok bool) {
+	if hu := hubUserFrom(r); hu != nil {
+		return "", hu.name + " (via hub)", true
+	}
 	return validateToken(reqToken(r), clientIP(r))
+}
+
+func viewOnly(r *http.Request) bool {
+	hu := hubUserFrom(r)
+	return hu != nil && hu.perm == "view"
 }
 
 // ------------------------------------------------------------ brute-force protection
@@ -120,7 +156,7 @@ func startWebServer(cert tls.Certificate) error {
 	mux.HandleFunc("/api/login", handleLogin)
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
 		if _, name, ok := authed(r); ok {
-			writeJSON(w, 200, map[string]any{"ok": true, "name": name})
+			writeJSON(w, 200, map[string]any{"ok": true, "name": name, "hub": hubUserFrom(r) != nil})
 			return
 		}
 		writeJSON(w, 401, map[string]any{"ok": false})
@@ -259,7 +295,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	runSession(conn, name, devID, clientIP(r))
+	runSession(conn, name, devID, clientIP(r), viewOnly(r))
 }
 
 // ------------------------------------------------------------ file transfer
@@ -279,6 +315,10 @@ func filesAllowed(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if !getConfig().AllowFiles {
 		writeJSON(w, 403, map[string]any{"error": "File transfer is disabled on this PC"})
+		return false
+	}
+	if viewOnly(r) {
+		writeJSON(w, 403, map[string]any{"error": "You have view-only access to this device"})
 		return false
 	}
 	return true

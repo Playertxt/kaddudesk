@@ -50,6 +50,8 @@ func main() {
 	}
 
 	loadConfig()
+	loadAccounts()
+	loadAudit()
 	logf("KadduDesk server %s starting on %s (admin=%v)", version, platformName(), isAdmin())
 	cert, err := loadOrCreateCert()
 	if err != nil {

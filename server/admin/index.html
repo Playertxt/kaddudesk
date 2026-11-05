@@ -109,7 +109,14 @@ pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px;
     <div class="toggle"><div><b>Be the hub</b> <span class="badge" id="hubBadge"></span><div class="muted tiny">Listens on port <span id="hubPortTxt"></span>. For outside access, forward this TCP port on your router (or use Tailscale).</div></div><label class="switch"><input type="checkbox" id="hubOn"><span></span></label></div>
     <div id="hubBox" hidden>
       <div class="toggle"><div>Hub address<div class="muted tiny" id="hubUrls"></div></div></div>
-      <div class="toggle"><div>Hub password <span class="muted tiny">(for people opening the hub)</span><div><code id="hubPw">••••••••</code></div></div><div class="row"><button id="hubPwShow">Show</button><button id="hubPwSet">Set…</button></div></div>
+      <div id="acctNone" class="toggle">
+        <div><b>Create the owner account</b><div class="muted tiny">People sign in to the hub with an account (password + two-factor code). Only this PC can create the owner.</div></div>
+        <div class="row" style="margin-top:8px"><input type="text" id="ownU" placeholder="Username" style="width:150px" autocomplete="off"><input type="password" id="ownP" placeholder="Password (10+ chars, mixed)" style="width:210px" autocomplete="new-password"><button class="primary" id="ownBtn">Create owner</button></div>
+      </div>
+      <div id="acctSome" class="toggle">
+        <div>Accounts <span class="badge" id="acct2fa"></span><div class="muted tiny" id="acctList"></div><div class="muted tiny">Manage people, workspaces and security by signing in to the hub as the owner.</div></div>
+        <div class="row"><button id="acctOpen">Open hub</button><button id="acctRec">Recover…</button></div>
+      </div>
       <div class="toggle"><div>Host key <span class="muted tiny">(for PCs joining the hub)</span><div><code id="hubKey">••••••••</code></div></div><div class="row"><button id="hubKeyShow">Show</button><button id="hubKeyNew" class="danger">New</button></div></div>
       <h2 style="margin-top:14px">Devices on this hub</h2>
       <table id="hubDevs"></table>
@@ -124,6 +131,7 @@ pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px;
       <div class="toggle"><div>Host key</div><input type="text" id="joinKey" placeholder="from the hub's control panel" style="width:220px"></div>
       <div class="row" style="margin-top:10px"><button class="primary" id="joinBtn">Join hub</button></div>
     </div>
+    <div class="toggle"><div>Let hub accounts connect without this PC's PIN<div class="muted tiny">The hub has already checked their password and 2FA, and only people you gave access can open this PC.</div></div><label class="switch"><input type="checkbox" id="trustHub"><span></span></label></div>
     <div id="joinStatus" hidden>
       <div class="toggle"><div>Hub <code id="joinedAddr"></code><div class="muted tiny">Fingerprint <code id="joinedFp"></code></div></div><span class="badge" id="joinBadge"></span></div>
       <div class="muted tiny" id="joinErr"></div>
@@ -225,7 +233,7 @@ $('#fw').onclick = () => api('/admin/firewall').then(() => alert('Firewall rule 
 $('#fwPub').onclick = () => confirm('Allow connections on PUBLIC networks too (cafés, airports)? Only do this if you understand the risk; the PIN still protects access.') && api('/admin/firewall?public=1').then(() => alert('Allowed on all networks.')).catch((e) => alert(e.message));
 $('#quitBtn').onclick = () => confirm('Stop the KadduDesk server? Nobody will be able to connect until you start it again.') && api('/admin/quit').then(() => document.body.innerHTML = '<p style="padding:40px">Server stopped. You can close this tab.</p>');
 
-let hubPwVis = false, hubKeyVis = false;
+let hubKeyVis = false;
 function renderHub() {
   const h = st.hub, j = st.hubJoin;
   $('#myId').textContent = st.deviceId;
@@ -235,7 +243,12 @@ function renderHub() {
   $('#hubPortTxt').textContent = h.port;
   $('#hubBox').hidden = !h.enabled;
   $('#hubUrls').innerHTML = h.urls.map((u) => '<code>' + esc(u) + '</code>').join(' ');
-  $('#hubPw').textContent = hubPwVis ? h.password : '••••••••';
+  const a = h.accounts || {};
+  $('#acctNone').hidden = !!a.has; $('#acctSome').hidden = !a.has;
+  $('#acctList').textContent = (a.users || []).join(', ');
+  $('#acct2fa').textContent = a.require2fa ? '2FA required' : '2FA optional';
+  $('#acct2fa').className = 'badge ' + (a.require2fa ? 'ok' : 'warn');
+  $('#trustHub').checked = !st.settings.denyHubUsers;
   $('#hubKey').textContent = hubKeyVis ? h.hostKey : '••••••••';
   $('#hubDevs').innerHTML = h.devices.map((d) => `<tr><td><b>${esc(d.name)}</b> ${d.self ? '<span class="badge">this PC</span>' : ''}<div class="muted tiny">${esc(d.pretty)} · ${esc(d.os || '')} · ${d.online ? '<span style="color:var(--ok)">online</span>' : 'offline'}</div></td><td style="text-align:right">${d.self ? '' : `<button class="danger" data-forget="${d.id}">Remove</button>`}</td></tr>`).join('');
   document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = () => confirm('Remove this device from the hub list? It reappears if it connects again with the host key.') && api('/admin/hub/forget?id=' + b.dataset.forget).then(refresh));
@@ -249,9 +262,20 @@ function renderHub() {
   }
 }
 $('#hubOn').onchange = (e) => api('/admin/hub/settings', { enabled: e.target.checked }).then(refresh).catch((er) => { alert(er.message); refresh(); });
-$('#hubPwShow').onclick = () => { hubPwVis = !hubPwVis; renderHub(); };
+$('#ownBtn').onclick = async () => {
+  try { await api('/admin/hub/owner', { username: $('#ownU').value, password: $('#ownP').value }); $('#ownP').value = ''; alert('Owner account created. Open the hub and sign in to set up two-factor authentication.'); refresh(); }
+  catch (e) { alert(e.message); }
+};
+$('#acctOpen').onclick = () => { const u = (st.hub.urls || [])[0]; window.open('https://' + (u || ('127.0.0.1:' + st.hub.port)) + '/', '_blank'); };
+$('#acctRec').onclick = async () => {
+  const u = prompt('Recover which account? (resets its password and turns off its 2FA; it must set up 2FA again)');
+  if (!u) return;
+  const p = prompt('New password for ' + u + ' (10+ characters, mixed):');
+  if (!p) return;
+  try { await api('/admin/hub/recover', { username: u, password: p }); alert('Done. Sign in to the hub as ' + u + ' with the new password.'); refresh(); } catch (e) { alert(e.message); }
+};
+$('#trustHub').onchange = (e) => api('/admin/settings', { denyHubUsers: !e.target.checked }).then(refresh);
 $('#hubKeyShow').onclick = () => { hubKeyVis = !hubKeyVis; renderHub(); };
-$('#hubPwSet').onclick = async () => { const p = prompt('New hub password (at least 6 characters, leave empty for a random one):'); if (p === null) return; try { await api('/admin/hub/password', { password: p }); hubPwVis = true; refresh(); } catch (e) { alert(e.message); } };
 $('#hubKeyNew').onclick = async () => { if (!confirm('Generate a new host key? Every PC on this hub must re-join with the new key.')) return; await api('/admin/hub/hostkey'); hubKeyVis = true; refresh(); };
 $('#joinBtn').onclick = async () => {
   const addr = $('#joinAddr').value.trim(), key = $('#joinKey').value.trim();

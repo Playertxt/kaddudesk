@@ -171,21 +171,22 @@ func startAdmin() error {
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	api("/admin/hub/password", func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ Password string }
-		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-		p := strings.TrimSpace(req.Password)
-		if p == "" {
-			p = randomPin(8)
-		}
-		if len(p) < 6 {
-			writeJSON(w, 400, map[string]any{"error": "Use at least 6 characters"})
+	api("/admin/hub/owner", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Username, Password string }
+		json.NewDecoder(io.LimitReader(r.Body, 2048)).Decode(&req)
+		if err := createOwner(strings.TrimSpace(req.Username), req.Password); err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
 		}
-		cfgMu.Lock()
-		setHubPassLocked(p)
-		saveConfigLocked()
-		cfgMu.Unlock()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	api("/admin/hub/recover", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Username, Password string }
+		json.NewDecoder(io.LimitReader(r.Body, 2048)).Decode(&req)
+		if err := recoverAccount(strings.TrimSpace(req.Username), req.Password); err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	api("/admin/hub/hostkey", func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +272,16 @@ func adminURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d/#k=%s", getConfig().AdminPort, adminKey)
 }
 
+func accountSummary() map[string]any {
+	acctMu.Lock()
+	defer acctMu.Unlock()
+	var users []string
+	for _, u := range acct.Users {
+		users = append(users, u.Username+" ("+u.Role+")")
+	}
+	return map[string]any{"has": len(acct.Users) > 0, "users": users, "require2fa": acct.Security.Require2FA}
+}
+
 func hubURLs(c Config) []string {
 	var out []string
 	for _, ip := range localIPs() {
@@ -307,14 +318,14 @@ func adminState(w http.ResponseWriter, r *http.Request) {
 		"encoder": enc, "fps": fps, "kbps": kbps, "lastError": lastErr, "ffmpeg": ffmpegPath,
 		"admin": isAdmin(), "autostart": autostartEnabled(), "service": agentMode, "serviceInstalled": serviceInstalled(), "platform": platformName(), "version": version, "desktop": inputDesktopName(),
 		"deviceId": prettyID(deviceID()),
-		"hub": map[string]any{"enabled": c.HubEnabled, "running": hubRunning(), "port": c.HubPort, "password": c.HubPassPlain,
+		"hub": map[string]any{"enabled": c.HubEnabled, "running": hubRunning(), "port": c.HubPort, "accounts": accountSummary(),
 			"hostKey": c.HubHostKey, "devices": hubDeviceList(), "urls": hubURLs(c)},
 		"hubJoin": map[string]any{"addr": c.HubAddr, "fp": prettyFP(c.HubFP), "status": hubLink.status()},
 		"settings": map[string]any{
 			"requireApproval": c.RequireApproval, "allowControl": c.AllowControl, "allowFiles": c.AllowFiles,
 			"allowAudio": c.AllowAudio, "allowClipboard": c.AllowClipboard, "allowPower": c.AllowPower,
 			"defaultFps": c.DefaultFPS, "defaultBitrate": c.DefaultBitrate, "encoder": c.Encoder,
-			"uploadDir": uploadDir(), "name": c.Name, "paused": c.Paused, "port": c.Port,
+			"uploadDir": uploadDir(), "name": c.Name, "paused": c.Paused, "port": c.Port, "denyHubUsers": c.DenyHubUsers,
 		},
 	})
 }
@@ -349,6 +360,7 @@ func adminSettings(w http.ResponseWriter, r *http.Request) {
 	b("allowClipboard", &cfg.AllowClipboard)
 	b("allowPower", &cfg.AllowPower)
 	b("paused", &cfg.Paused)
+	b("denyHubUsers", &cfg.DenyHubUsers)
 	n("defaultFps", &cfg.DefaultFPS, 5, 144)
 	n("defaultBitrate", &cfg.DefaultBitrate, 300, 150000)
 	n("port", &cfg.Port, 1024, 65535)

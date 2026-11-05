@@ -105,7 +105,7 @@ build_android() {
   cp clients/launcher/index.html clients/launcher/style.css clients/launcher/bridge.js clients/launcher/icon.png "$B/assets/launcher/"
   "$BT/aapt2" compile --dir android/res -o "$B/res.zip"
   "$BT/aapt2" link -o "$B/base.apk" -I "$PLAT" --manifest android/AndroidManifest.xml -A "$B/assets" \
-     --min-sdk-version 24 --target-sdk-version 35 --version-code 2 --version-name 1.1.0 --java "$B/gen" "$B/res.zip"
+     --min-sdk-version 24 --target-sdk-version 35 --version-code 3 --version-name 1.2.0 --java "$B/gen" "$B/res.zip"
   javac --release 11 -nowarn -encoding UTF-8 -classpath "$PLAT" -d "$B/classes" \
      $(find android/src -name '*.java') $(find "$B/gen" -name '*.java')
   "$BT/d8.bat" --release --min-api 24 --lib "$PLAT" --output "$B/dex" $(find "$B/classes" -name '*.class')

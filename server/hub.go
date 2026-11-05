@@ -10,10 +10,8 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -80,14 +78,9 @@ func applyHubSettings(cert tls.Certificate) error {
 	if !c.HubEnabled {
 		return nil
 	}
-	if c.HubHostKey == "" || c.HubPassHash == "" {
+	if c.HubHostKey == "" {
 		cfgMu.Lock()
-		if cfg.HubHostKey == "" {
-			cfg.HubHostKey = randomHex(12)
-		}
-		if cfg.HubPassHash == "" {
-			setHubPassLocked(randomPin(8))
-		}
+		cfg.HubHostKey = randomHex(12)
 		saveConfigLocked()
 		cfgMu.Unlock()
 	}
@@ -97,9 +90,14 @@ func applyHubSettings(cert tls.Certificate) error {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		secHeaders(w)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
 		switch r.URL.Path {
-		case "/":
+		case "/", "/index.html":
 			http.ServeFileFS(w, r, sub, "index.html")
+		case "/hub.js":
+			http.ServeFileFS(w, r, sub, "hub.js")
 		case "/bridge.js", "/style.css", "/icon.png":
 			http.ServeFileFS(w, r, webSub, strings.TrimPrefix(r.URL.Path, "/"))
 		default:
@@ -109,53 +107,7 @@ func applyHubSettings(cert tls.Certificate) error {
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"app": "kaddudesk-hub", "name": getConfig().Name, "version": version, "fp": certFingerprint})
 	})
-	mux.HandleFunc("/hub/api/login", hubLogin)
-	mux.HandleFunc("/hub/api/logout", func(w http.ResponseWriter, r *http.Request) {
-		if ck, err := r.Cookie("kdhub"); err == nil {
-			hub.mu.Lock()
-			delete(hub.sess, tokenHash(ck.Value))
-			hub.mu.Unlock()
-			cfgMu.Lock()
-			out := cfg.HubTokens[:0]
-			for _, t := range cfg.HubTokens {
-				if t.TokenHash != tokenHash(ck.Value) {
-					out = append(out, t)
-				}
-			}
-			cfg.HubTokens = out
-			saveConfigLocked()
-			cfgMu.Unlock()
-		}
-		http.SetCookie(w, &http.Cookie{Name: "kdhub", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true})
-		writeJSON(w, 200, map[string]any{"ok": true})
-	})
-	mux.HandleFunc("/hub/api/devices", func(w http.ResponseWriter, r *http.Request) {
-		if !hubAuthed(r) {
-			writeJSON(w, 401, map[string]any{"error": "login required"})
-			return
-		}
-		writeJSON(w, 200, map[string]any{"devices": hubDeviceList(), "hub": getConfig().Name})
-	})
-	mux.HandleFunc("/hub/api/wake", func(w http.ResponseWriter, r *http.Request) {
-		if !hubAuthed(r) {
-			writeJSON(w, 401, map[string]any{"error": "login required"})
-			return
-		}
-		id := r.URL.Query().Get("id")
-		for _, d := range getConfig().HubKnown {
-			if d.ID == id {
-				n := 0
-				for _, m := range d.Macs {
-					if sendWOL(m.MAC, m.Bcast) == nil {
-						n++
-					}
-				}
-				writeJSON(w, 200, map[string]any{"ok": n > 0})
-				return
-			}
-		}
-		writeJSON(w, 404, map[string]any{"error": "unknown device"})
-	})
+	registerAccountAPI(mux)
 	mux.HandleFunc("/hub/host", hubHostConn)
 	mux.HandleFunc("/hub/data", hubDataConn)
 	mux.HandleFunc("/d/", hubDeviceProxy)
@@ -178,77 +130,6 @@ func applyHubSettings(cert tls.Certificate) error {
 		}
 	}
 	return nil
-}
-
-func setHubPassLocked(p string) {
-	cfg.HubPassSalt = randomHex(16)
-	cfg.HubPassHash = hashPin(p, cfg.HubPassSalt)
-	cfg.HubPassPlain = p
-}
-
-// ------------------------------------------------------------ client auth (hub password)
-
-func hubLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
-	if d := lockedOut(ip); d > 0 {
-		writeJSON(w, 429, map[string]any{"error": fmt.Sprintf("Too many wrong passwords. Try again in %d s.", int(d.Seconds())+1)})
-		return
-	}
-	var req struct {
-		Password string `json:"password"`
-		Remember bool   `json:"remember"`
-		Device   string `json:"device"`
-	}
-	if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req) != nil {
-		writeJSON(w, 400, map[string]any{"error": "bad request"})
-		return
-	}
-	c := getConfig()
-	if subtle.ConstantTimeCompare([]byte(hashPin(strings.TrimSpace(req.Password), c.HubPassSalt)), []byte(c.HubPassHash)) != 1 {
-		noteFail(ip)
-		writeJSON(w, 401, map[string]any{"error": "Wrong hub password"})
-		return
-	}
-	clearFail(ip)
-	tok := randomHex(32)
-	ck := &http.Cookie{Name: "kdhub", Value: tok, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}
-	if req.Remember {
-		cfgMu.Lock()
-		cfg.HubTokens = append(cfg.HubTokens, TrustedDevice{ID: randomHex(6), Name: req.Device, TokenHash: tokenHash(tok),
-			Created: time.Now(), LastSeen: time.Now(), LastIP: ip})
-		saveConfigLocked()
-		cfgMu.Unlock()
-		ck.MaxAge = 365 * 24 * 3600
-	} else {
-		hub.mu.Lock()
-		hub.sess[tokenHash(tok)] = time.Now().Add(12 * time.Hour)
-		hub.mu.Unlock()
-	}
-	http.SetCookie(w, ck)
-	logf("hub login ok: %s (%s)", req.Device, ip)
-	writeJSON(w, 200, map[string]any{"ok": true})
-}
-
-func hubAuthed(r *http.Request) bool {
-	ck, err := r.Cookie("kdhub")
-	if err != nil || ck.Value == "" {
-		return false
-	}
-	h := tokenHash(ck.Value)
-	hub.mu.Lock()
-	exp, ok := hub.sess[h]
-	hub.mu.Unlock()
-	if ok && time.Now().Before(exp) {
-		return true
-	}
-	cfgMu.RLock()
-	defer cfgMu.RUnlock()
-	for _, t := range cfg.HubTokens {
-		if subtle.ConstantTimeCompare([]byte(t.TokenHash), []byte(h)) == 1 {
-			return true
-		}
-	}
-	return false
 }
 
 func hubDeviceList() []map[string]any {
@@ -455,6 +336,12 @@ func deviceProxy(id string) *httputil.ReverseProxy {
 			pr.Out.Host = pr.In.Host // keep Origin/Host consistent for the device's WebSocket check
 			pr.SetXForwarded()
 			pr.Out.Header.Del("Cookie") // the hub cookie is ours, not the device's
+			pr.Out.Header.Del("X-KD-Hub-User")
+			pr.Out.Header.Del("X-KD-Hub-Perm")
+			if id, ok := pr.In.Context().Value(hubIdentKey).(*hubIdentity); ok {
+				pr.Out.Header.Set("X-KD-Hub-User", id.name)
+				pr.Out.Header.Set("X-KD-Hub-Perm", id.perm)
+			}
 		},
 		Transport: &http.Transport{
 			DialContext:         func(ctx context.Context, _, _ string) (net.Conn, error) { return dialDevice(ctx, id) },
@@ -475,11 +362,21 @@ func hubDeviceProxy(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !hubAuthed(r) {
+	u, _ := currentUser(r)
+	if u == nil || u.MustChange || needs2FASetup(u) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 	id := m[1]
+	perm := devicePerm(u, id)
+	if perm == "" {
+		http.Error(w, "You don't have access to this device", http.StatusForbidden)
+		return
+	}
+	if m[2] == "/ws" {
+		go audit("device-session", u.Username, clientIP(r), prettyID(id)+" ("+perm+")")
+	}
+	r = r.WithContext(context.WithValue(r.Context(), hubIdentKey, &hubIdentity{name: u.Username, perm: perm}))
 	if m[2] == "" {
 		http.Redirect(w, r, r.URL.Path+"/", http.StatusFound)
 		return
@@ -488,6 +385,8 @@ func hubDeviceProxy(w http.ResponseWriter, r *http.Request) {
 		r2 := r.Clone(r.Context())
 		r2.URL.Path, r2.URL.RawPath = m[2], ""
 		r2.Header.Del("Cookie")
+		r2.Header.Del("X-KD-Hub-User")
+		r2.Header.Del("X-KD-Hub-Perm")
 		webMux.ServeHTTP(w, r2)
 		return
 	}

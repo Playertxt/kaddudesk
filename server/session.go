@@ -32,6 +32,7 @@ type Client struct {
 	audMu    sync.Mutex
 	vsub     *videoSub
 	keysDown map[string]bool
+	viewOnly bool
 	btnDown  map[int]bool
 	sentKB   atomic.Int64
 }
@@ -154,11 +155,11 @@ type inMsg struct {
 	Cfg *VideoCfg `json:"cfg"`
 }
 
-func runSession(conn *websocket.Conn, name, deviceID, ip string) {
+func runSession(conn *websocket.Conn, name, deviceID, ip string, viewOnly bool) {
 	c := &Client{
 		id: randomHex(4), name: name, deviceID: deviceID, ip: ip, since: time.Now(),
 		conn: conn, out: make(chan []byte, 256), closed: make(chan struct{}),
-		keysDown: map[string]bool{}, btnDown: map[int]bool{},
+		keysDown: map[string]bool{}, btnDown: map[int]bool{}, viewOnly: viewOnly,
 	}
 	conf := getConfig()
 	c.cfg = VideoCfg{Monitor: 0, FPS: conf.DefaultFPS, Bitrate: conf.DefaultBitrate}
@@ -186,8 +187,8 @@ func runSession(conn *websocket.Conn, name, deviceID, ip string) {
 	c.sendJSON(map[string]any{
 		"t": "hello", "name": conf.Name, "version": version, "monitors": mons, "cfg": c.cfg,
 		"features": map[string]bool{
-			"control": conf.AllowControl, "files": conf.AllowFiles, "audio": conf.AllowAudio,
-			"clipboard": conf.AllowClipboard, "power": conf.AllowPower,
+			"control": conf.AllowControl && !viewOnly, "files": conf.AllowFiles && !viewOnly, "audio": conf.AllowAudio,
+			"clipboard": conf.AllowClipboard && !viewOnly, "power": conf.AllowPower && !viewOnly,
 		},
 		"macs": macAddrs(), "admin": isAdmin(), "fp": certFingerprint, "you": c.id,
 		"service": agentMode, "desk": inputDesktopName(),
@@ -334,7 +335,7 @@ func (c *Client) monitorRect() Monitor {
 
 func (c *Client) handle(m *inMsg) {
 	conf := getConfig()
-	ctl := conf.AllowControl
+	ctl := conf.AllowControl && !c.viewOnly
 	switch m.T {
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "ts": m.TS})
@@ -417,7 +418,7 @@ func (c *Client) handle(m *inMsg) {
 			}
 		})
 	case "clip":
-		if !conf.AllowClipboard || len(m.S) > 1<<20 {
+		if !conf.AllowClipboard || c.viewOnly || len(m.S) > 1<<20 {
 			return
 		}
 		if err := setClipboardText(m.S); err == nil {
@@ -425,7 +426,7 @@ func (c *Client) handle(m *inMsg) {
 			broadcastJSON(map[string]any{"t": "clip", "s": m.S}, func(o *Client) bool { return o != c })
 		}
 	case "power":
-		if !conf.AllowPower {
+		if !conf.AllowPower || c.viewOnly {
 			c.sendJSON(map[string]any{"t": "notice", "s": "Power actions are disabled on this PC"})
 			return
 		}

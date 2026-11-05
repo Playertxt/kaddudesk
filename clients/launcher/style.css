@@ -149,3 +149,9 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
   border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; max-width: 90%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
 dialog { background: var(--panel-solid); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 20px; max-width: 340px; }
 dialog::backdrop { background: rgba(0,0,0,.5); }
+
+/* embedded in the hub's multi-device view */
+.embed #loginHome { display: none !important; }
+.thumb #topTab, .thumb #bubble, .thumb #stats, .thumb #keybar, .thumb #drawer, .thumb #scrim, .thumb #toast, .thumb #vcursor { display: none !important; }
+.thumb .status { transform: translate(-50%, -50%) scale(.75); }
+.thumb .card { transform: scale(.8); }
