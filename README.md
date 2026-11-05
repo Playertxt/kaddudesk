@@ -16,6 +16,7 @@
 5b. [Connecting from Linux](#5b-connecting-from-linux)
 6. [Connecting from a browser](#6-connecting-from-a-browser)
 7. [Service mode: lock screen, UAC, Ctrl+Alt+Del](#7-service-mode-lock-screen-uac-ctrlaltdel)
+7b. [Hub: control any device from any device (AnyDesk-style)](#7b-hub-control-any-device-from-any-device-anydesk-style)
 8. [Using it from outside your home](#8-using-it-from-outside-your-home)
 9. [Wake-on-LAN](#9-wake-on-lan)
 10. [Using a session: controls, gestures, shortcuts](#10-using-a-session-controls-gestures-shortcuts)
@@ -52,6 +53,7 @@
 - Fullscreen with keyboard lock: Win, Alt+Tab and Esc go to the remote PC
 - PIN login, remembered devices, per-device revoke, kick, pause sharing, optional "ask me first" prompt
 - **Service mode**: control the lock screen, sign-in screen and UAC prompts; works before anyone signs in
+- **Hub (AnyDesk-style)**: your main PC relays for all your devices; 9-digit device IDs; control any of them from anywhere; one port to forward
 - **Phone-first touch**: trackpad mode or direct-touch mode, pinch-zoom, sticky Ctrl/Alt/Shift/Win key bar, haptics
 - LAN auto-discovery (PCs just appear), Wake-on-LAN, power menu (lock / sleep / restart / shut down / sign out)
 - Live stats overlay (latency, ping, decode time, fps, bitrate), Auto quality, game mode (pointer lock)
@@ -212,6 +214,38 @@ KadduDeskServer.exe -uninstall-service
 ```
 
 Apps opened from the power menu (Task Manager, Explorer, Terminal, Settings) start as the signed-in user, not as SYSTEM.
+
+## 7b. Hub: control any device from any device (AnyDesk-style)
+
+Make **your main PC the hub**. Every other computer (Windows or Linux) *joins* it and keeps an outbound connection to it, so it's reachable from anywhere, even behind another router or on mobile data. Each device gets a 9-digit **device ID** like AnyDesk. Any phone or computer that opens the hub sees all your devices and can control any of them. **All traffic is relayed through the main PC**, so the load sits there.
+
+```
+  phone / laptop / browser ──► HUB (main PC, port 47820) ◄── PC #2 (joined, outbound)
+                                     ▲          ▲
+                                     │          └──── Linux box (joined, outbound)
+                                     └─ the main PC itself is a device too
+```
+
+**1. On the main PC (the hub)**
+1. Open the control panel → **Hub** card → turn on **Be the hub**.
+2. Note the **Hub password** (for people) and the **Host key** (for PCs that join). Click *Show*; you can change both.
+3. For access from outside your home, forward **TCP 47820** on your router to the main PC, or use Tailscale. That's the only port you need; other PCs don't need any port forwarding.
+
+**2. On every other PC**
+1. Install and run KadduDesk Server (Windows `.exe`, or the Linux package).
+2. Control panel → **Join a hub** → enter the hub address (e.g. `192.168.1.10`, `my-home.example.com` or a Tailscale IP; port 47820 is the default) and the **host key** → **Join hub**.
+3. Compare the fingerprint it shows with the main PC's certificate fingerprint and confirm. The card turns **connected**, and the PC shows up on the hub with its ID.
+
+**3. Connect from anywhere**
+- In the **KadduDesk app** (Android / Windows / Linux), the hub appears under *Nearby* as **🌐 … · Hub** on the same network. You can also add it by address with port **47820**. Tap **Open hub**, enter the hub password once, then pick a device.
+- In a **browser**: open `https://<hub-address>:47820/`.
+- Each device still asks for **its own PIN** the first time (with *Remember this device* you won't be asked again). Knowing the hub password alone doesn't give control.
+- **⏰ Wake** on an offline device sends Wake-on-LAN *from the hub's network*, so you can wake a sleeping home PC from your phone on mobile data.
+
+**Security**
+- Device ↔ hub uses TLS with the hub's certificate **pinned** on each device. Devices need the host key to join; regenerating it disconnects every device until it re-joins.
+- Client ↔ hub uses TLS with the hub pinned in the apps, a hub password (brute-force limited) and an HttpOnly cookie. Then the device's own PIN or remembered-device token is checked on the device itself.
+- The hub sees relayed traffic (it terminates TLS), so run it on a PC you trust: your own main PC.
 
 ---
 
@@ -456,6 +490,7 @@ build.sh                one-command build
 - **Service mode was not tested on real hardware before release.** If something misbehaves, check `C:\ProgramData\KadduDesk\service.log` and `server.log`, then turn Service mode off.
 - H.264 4:2:0 only, so very fine coloured text can look slightly soft. A 4:4:4 / AV1 option is planned.
 - Over the internet it's TCP only; a UDP/WebRTC transport for lossy mobile networks is planned.
+- Android phones can control devices but can't be controlled yet (no screen-sharing host on Android).
 - No iOS app yet. iPhone/iPad browsers may lack the WebCodecs H.264 decoding the browser client needs.
 - Executables aren't code-signed (SmartScreen warns once).
 - GPU scaling isn't used yet (`scale_d3d11` fails in current ffmpeg builds), so lowered resolutions are scaled on the CPU.

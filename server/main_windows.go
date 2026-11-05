@@ -63,7 +63,7 @@ func selectDataDir() {
 var instanceMutex windows.Handle
 
 func alreadyRunning() bool {
-	name, _ := windows.UTF16PtrFromString(`Global\KadduDeskServerMutex`)
+	name, _ := windows.UTF16PtrFromString(`Global\KadduDeskServerMutex` + *flagProfile)
 	h, err := windows.CreateMutex(nil, false, name)
 	if err != windows.ERROR_ALREADY_EXISTS {
 		instanceMutex = h

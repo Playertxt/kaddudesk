@@ -79,3 +79,6 @@ func addFirewallRuleFor(exe string, public bool) error {
 	logf("firewall rule added (profile=%s)", profile)
 	return nil
 }
+
+// addHubFirewallRule is covered by the program rule (it allows any port for this exe).
+func addHubFirewallRule() {}

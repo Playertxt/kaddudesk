@@ -103,6 +103,34 @@ pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px;
     <p class="tiny muted">Phone can't connect? Make sure both are on the same Wi-Fi and that Windows marks this network as <b>Private</b> (Settings → Network → Wi-Fi → your network).</p>
   </section>
 
+  <section class="card">
+    <h2>Hub · control every device from anywhere</h2>
+    <p class="muted tiny" style="margin-top:-6px">Make this PC the hub: your other PCs connect out to it, and any phone or computer that opens the hub can control any of them. All traffic is relayed through this PC.</p>
+    <div class="toggle"><div><b>Be the hub</b> <span class="badge" id="hubBadge"></span><div class="muted tiny">Listens on port <span id="hubPortTxt"></span>. For outside access, forward this TCP port on your router (or use Tailscale).</div></div><label class="switch"><input type="checkbox" id="hubOn"><span></span></label></div>
+    <div id="hubBox" hidden>
+      <div class="toggle"><div>Hub address<div class="muted tiny" id="hubUrls"></div></div></div>
+      <div class="toggle"><div>Hub password <span class="muted tiny">(for people opening the hub)</span><div><code id="hubPw">••••••••</code></div></div><div class="row"><button id="hubPwShow">Show</button><button id="hubPwSet">Set…</button></div></div>
+      <div class="toggle"><div>Host key <span class="muted tiny">(for PCs joining the hub)</span><div><code id="hubKey">••••••••</code></div></div><div class="row"><button id="hubKeyShow">Show</button><button id="hubKeyNew" class="danger">New</button></div></div>
+      <h2 style="margin-top:14px">Devices on this hub</h2>
+      <table id="hubDevs"></table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Join a hub</h2>
+    <p class="muted tiny" style="margin-top:-6px">Make this PC reachable through your main PC's hub, from any network. This PC's ID: <b id="myId" style="color:var(--accent)"></b></p>
+    <div id="joinForm">
+      <div class="toggle"><div>Hub address</div><input type="text" id="joinAddr" placeholder="192.168.1.10 or my.host:47820" style="width:220px"></div>
+      <div class="toggle"><div>Host key</div><input type="text" id="joinKey" placeholder="from the hub's control panel" style="width:220px"></div>
+      <div class="row" style="margin-top:10px"><button class="primary" id="joinBtn">Join hub</button></div>
+    </div>
+    <div id="joinStatus" hidden>
+      <div class="toggle"><div>Hub <code id="joinedAddr"></code><div class="muted tiny">Fingerprint <code id="joinedFp"></code></div></div><span class="badge" id="joinBadge"></span></div>
+      <div class="muted tiny" id="joinErr"></div>
+      <div class="row" style="margin-top:10px"><button class="danger" id="leaveBtn">Leave hub</button></div>
+    </div>
+  </section>
+
   <section class="card wide">
     <div class="row between"><h2>Log</h2><button id="logRefresh">Refresh</button></div>
     <pre id="log"></pre>
@@ -158,6 +186,7 @@ async function refresh() {
   const linux = st.platform === 'Linux';
   $('#service').closest('.toggle').hidden = linux;
   if (linux) $('#autostartRow > div').innerHTML = 'Start at login<div class="muted tiny">Adds KadduDesk to your desktop session autostart</div>';
+  renderHub();
   if (!formLoaded) {
     formLoaded = true;
     $('#pcname').value = st.settings.name; $('#dfps').value = st.settings.defaultFps; $('#dbr').value = Math.round(st.settings.defaultBitrate / 1000);
@@ -195,6 +224,45 @@ $('#saveSrv').onclick = async () => {
 $('#fw').onclick = () => api('/admin/firewall').then(() => alert('Firewall rule added for private networks.')).catch((e) => alert(e.message));
 $('#fwPub').onclick = () => confirm('Allow connections on PUBLIC networks too (cafés, airports)? Only do this if you understand the risk; the PIN still protects access.') && api('/admin/firewall?public=1').then(() => alert('Allowed on all networks.')).catch((e) => alert(e.message));
 $('#quitBtn').onclick = () => confirm('Stop the KadduDesk server? Nobody will be able to connect until you start it again.') && api('/admin/quit').then(() => document.body.innerHTML = '<p style="padding:40px">Server stopped. You can close this tab.</p>');
+
+let hubPwVis = false, hubKeyVis = false;
+function renderHub() {
+  const h = st.hub, j = st.hubJoin;
+  $('#myId').textContent = st.deviceId;
+  $('#hubOn').checked = h.enabled;
+  $('#hubBadge').textContent = h.running ? 'running' : h.enabled ? 'error' : 'off';
+  $('#hubBadge').className = 'badge ' + (h.running ? 'ok' : h.enabled ? 'bad' : '');
+  $('#hubPortTxt').textContent = h.port;
+  $('#hubBox').hidden = !h.enabled;
+  $('#hubUrls').innerHTML = h.urls.map((u) => '<code>' + esc(u) + '</code>').join(' ');
+  $('#hubPw').textContent = hubPwVis ? h.password : '••••••••';
+  $('#hubKey').textContent = hubKeyVis ? h.hostKey : '••••••••';
+  $('#hubDevs').innerHTML = h.devices.map((d) => `<tr><td><b>${esc(d.name)}</b> ${d.self ? '<span class="badge">this PC</span>' : ''}<div class="muted tiny">${esc(d.pretty)} · ${esc(d.os || '')} · ${d.online ? '<span style="color:var(--ok)">online</span>' : 'offline'}</div></td><td style="text-align:right">${d.self ? '' : `<button class="danger" data-forget="${d.id}">Remove</button>`}</td></tr>`).join('');
+  document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = () => confirm('Remove this device from the hub list? It reappears if it connects again with the host key.') && api('/admin/hub/forget?id=' + b.dataset.forget).then(refresh));
+  const joined = !!j.addr;
+  $('#joinForm').hidden = joined; $('#joinStatus').hidden = !joined;
+  if (joined) {
+    $('#joinedAddr').textContent = j.addr; $('#joinedFp').textContent = j.fp;
+    $('#joinBadge').textContent = j.status.connected ? 'connected' : 'connecting…';
+    $('#joinBadge').className = 'badge ' + (j.status.connected ? 'ok' : 'warn');
+    $('#joinErr').textContent = j.status.error || '';
+  }
+}
+$('#hubOn').onchange = (e) => api('/admin/hub/settings', { enabled: e.target.checked }).then(refresh).catch((er) => { alert(er.message); refresh(); });
+$('#hubPwShow').onclick = () => { hubPwVis = !hubPwVis; renderHub(); };
+$('#hubKeyShow').onclick = () => { hubKeyVis = !hubKeyVis; renderHub(); };
+$('#hubPwSet').onclick = async () => { const p = prompt('New hub password (at least 6 characters, leave empty for a random one):'); if (p === null) return; try { await api('/admin/hub/password', { password: p }); hubPwVis = true; refresh(); } catch (e) { alert(e.message); } };
+$('#hubKeyNew').onclick = async () => { if (!confirm('Generate a new host key? Every PC on this hub must re-join with the new key.')) return; await api('/admin/hub/hostkey'); hubKeyVis = true; refresh(); };
+$('#joinBtn').onclick = async () => {
+  const addr = $('#joinAddr').value.trim(), key = $('#joinKey').value.trim();
+  try {
+    const r = await api('/admin/hub/join', { addr, key });
+    if (!confirm(`Join hub "${r.name || addr}"?\n\nCheck that this fingerprint matches the Certificate fingerprint shown on the hub PC:\n\n${r.fp.match(/.{4}/g).slice(0, 8).join(' ')}`)) return;
+    await api('/admin/hub/join', { addr, key, fp: r.fp });
+    refresh();
+  } catch (e) { alert(e.message); }
+};
+$('#leaveBtn').onclick = () => confirm('Leave the hub? This PC will no longer be reachable through it.') && api('/admin/hub/leave').then(refresh);
 const loadLog = async () => { const r = await fetch('/admin/log', { headers: { 'X-KD-Key': key } }); $('#log').textContent = await r.text(); $('#log').scrollTop = 1e9; };
 $('#logRefresh').onclick = loadLog;
 refresh(); loadLog();

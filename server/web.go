@@ -26,6 +26,11 @@ var webFS embed.FS
 const version = "1.0.0"
 
 func clientIP(r *http.Request) string {
+	if r.Context().Value(viaTunnelKey) != nil { // relayed by our hub: it tells us who the client is
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
+	}
 	h, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -95,8 +100,11 @@ func clearFail(ip string) {
 
 // ------------------------------------------------------------ server
 
+var webMux *http.ServeMux
+
 func startWebServer(cert tls.Certificate) error {
 	mux := http.NewServeMux()
+	webMux = mux
 	sub, _ := fs.Sub(webFS, "web")
 	static := http.FileServer(http.FS(sub))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +115,7 @@ func startWebServer(cert tls.Certificate) error {
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		c := getConfig()
 		writeJSON(w, 200, map[string]any{"app": "kaddudesk", "name": c.Name, "version": version,
-			"fp": certFingerprint, "paused": c.Paused, "macs": macAddrs()})
+			"fp": certFingerprint, "paused": c.Paused, "macs": macAddrs(), "id": deviceID()})
 	})
 	mux.HandleFunc("/api/login", handleLogin)
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +419,12 @@ func discoveryLoop() {
 			continue
 		}
 		c := getConfig()
-		resp, _ := json.Marshal(map[string]any{"app": "kaddudesk", "name": c.Name, "port": c.Port,
-			"fp": certFingerprint, "macs": macAddrs(), "version": version})
+		m := map[string]any{"app": "kaddudesk", "name": c.Name, "port": c.Port,
+			"fp": certFingerprint, "macs": macAddrs(), "version": version, "id": deviceID()}
+		if hubRunning() {
+			m["hubPort"] = c.HubPort
+		}
+		resp, _ := json.Marshal(m)
 		pc.WriteToUDP(resp, addr)
 	}
 }

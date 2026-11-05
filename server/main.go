@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -16,11 +17,15 @@ var (
 	flagNoTray    = flag.Bool("notray", false, "run without tray icon")
 	flagMinimized = flag.Bool("minimized", false, "don't open the control panel on start")
 	flagDevHTTP   = flag.String("devhttp", "", "also serve plain HTTP on a loopback address, e.g. 127.0.0.1:47899 (testing)")
+	flagDevHub    = flag.String("devhub", "", "also serve the hub over plain HTTP on a loopback address (testing)")
+	flagProfile   = flag.String("profile", "", "run a separate instance with its own settings (testing / multiple instances)")
 	trayReady     bool
 	trayMu        sync.Mutex
 	mStatus       *systray.MenuItem
 	mPause        *systray.MenuItem
 )
+
+var serverCert tls.Certificate
 
 var agentMode bool // Windows: running as the SYSTEM agent started by the service
 
@@ -30,6 +35,9 @@ func main() {
 		return
 	}
 	selectDataDir()
+	if *flagProfile != "" {
+		initDataDirAt(dataDir + "-" + *flagProfile)
+	}
 
 	logFile, _ := os.OpenFile(filepath.Join(dataDir, "server.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	logRing.f = logFile
@@ -74,6 +82,12 @@ func main() {
 	if err != nil {
 		fatal("Could not listen on port %d: %v\n\nIs another program using it?", getConfig().Port, err)
 	}
+	startTunnelServer(webMux) // serves devices that reach us through a hub
+	go hubClientLoop()
+	if err := applyHubSettings(cert); err != nil {
+		logf("hub: %v", err)
+	}
+	serverCert = cert
 	if err := startAdmin(); err != nil {
 		logf("admin panel: %v", err)
 	}

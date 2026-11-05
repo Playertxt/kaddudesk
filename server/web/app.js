@@ -19,7 +19,12 @@ let S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.kd_settings || '{}')); } catch (e) {}
 const save = () => { try { localStorage.kd_settings = JSON.stringify(S); } catch (e) {} };
 
-let token = localStorage.kd_token || sessionStorage.kd_token || '';
+// When opened through a hub the app lives under /d/<id>/ — all URLs are relative to BASE,
+// and the saved login is kept per device.
+const BASE = location.pathname.replace(/[^/]*$/, '');
+const VIA_HUB = BASE !== '/';
+const TOK = VIA_HUB ? 'kd_token:' + BASE : 'kd_token';
+let token = localStorage[TOK] || sessionStorage[TOK] || '';
 
 // ------------------------------------------------------------------ helpers
 let toastT;
@@ -43,19 +48,20 @@ const authHdr = () => ({ Authorization: 'Bearer ' + token });
 // ------------------------------------------------------------------ boot
 async function boot() {
   if (!window.VideoDecoder || !window.isSecureContext) { $('#unsupported').hidden = false; return; }
-  if (KD.kind !== 'browser') $('#loginHome').hidden = false;
-  $('#loginHome').onclick = () => KD.home && KD.home();
+  if (KD.kind !== 'browser' || VIA_HUB) $('#loginHome').hidden = false;
+  if (VIA_HUB) $('#loginHome').textContent = '← Back to all devices';
+  $('#loginHome').onclick = () => goHome();
   try {
-    const info = await (await fetch('/api/info', { cache: 'no-store' })).json();
+    const info = await (await fetch(BASE + 'api/info', { cache: 'no-store' })).json();
     $('#loginTitle').textContent = info.name;
     $('#pcName').textContent = info.name;
     $('#fpShow').textContent = info.fp.match(/.{4}/g).slice(0, 4).join(' ');
     document.title = info.name + ' · KadduDesk';
   } catch (e) {}
   if (token) {
-    const r = await fetch('/api/check', { headers: authHdr() }).catch(() => null);
+    const r = await fetch(BASE + 'api/check', { headers: authHdr() }).catch(() => null);
     if (r && r.ok) return startSession();
-    token = ''; delete localStorage.kd_token;
+    token = ''; delete localStorage[TOK];
   }
   showLogin();
 }
@@ -76,12 +82,12 @@ $('#loginForm').addEventListener('submit', async (e) => {
   try {
     const remember = $('#remember').checked;
     localStorage.kd_devname = $('#devname').value;
-    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const r = await fetch(BASE + 'api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: $('#pin').value, remember, device: $('#devname').value }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Login failed');
     token = j.token;
-    if (remember) localStorage.kd_token = token; else sessionStorage.kd_token = token;
+    if (remember) localStorage[TOK] = token; else sessionStorage[TOK] = token;
     $('#pin').value = '';
     startSession();
   } catch (err) {
@@ -115,7 +121,7 @@ function status(msg) {
 function connect() {
   status(retry ? 'Reconnecting…' : 'Connecting…');
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws = new WebSocket(`${proto}//${location.host}${BASE}ws?token=${encodeURIComponent(token)}`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { retry = 0; };
   ws.onmessage = (ev) => {
@@ -126,8 +132,8 @@ function connect() {
     ws = null;
     resetDecoder();
     if (!wantOpen) return;
-    const r = await fetch('/api/check', { headers: authHdr() }).catch(() => null);
-    if (r && r.status === 401) { wantOpen = false; token = ''; delete localStorage.kd_token; return showLogin('Session expired — enter the PIN again.'); }
+    const r = await fetch(BASE + 'api/check', { headers: authHdr() }).catch(() => null);
+    if (r && r.status === 401) { wantOpen = false; token = ''; delete localStorage[TOK]; return showLogin('Session expired — enter the PIN again.'); }
     retry++;
     status('Connection lost — reconnecting…');
     setTimeout(() => wantOpen && connect(), Math.min(5000, 300 * retry));
@@ -641,7 +647,7 @@ async function loadFiles(p = curPath) {
   const list = $('#fileList');
   list.innerHTML = '<div class="empty">Loading…</div>';
   try {
-    const r = await fetch('/api/files?path=' + encodeURIComponent(p), { headers: authHdr() });
+    const r = await fetch(BASE + 'api/files?path=' + encodeURIComponent(p), { headers: authHdr() });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     curPath = j.path;
@@ -666,7 +672,7 @@ async function loadFiles(p = curPath) {
   } catch (e) { list.innerHTML = ''; list.insertAdjacentHTML('beforeend', '<div class="empty"></div>'); list.firstChild.textContent = e.message; }
 }
 function download(f) {
-  const url = `${location.origin}/api/download?path=${encodeURIComponent(f.path)}&token=${encodeURIComponent(token)}`;
+  const url = `${location.origin}${BASE}api/download?path=${encodeURIComponent(f.path)}&token=${encodeURIComponent(token)}`;
   if (KD.download) { KD.download(url, f.name); toast('Downloading ' + f.name + '…'); return; }
   const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
 }
@@ -677,7 +683,7 @@ function upload(files) {
     row.querySelector('.name').textContent = `${file.name} · ${fmtBytes(file.size)}`;
     $('#uploads').prepend(row);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload?name=' + encodeURIComponent(file.name));
+    xhr.open('POST', BASE + 'api/upload?name=' + encodeURIComponent(file.name));
     xhr.setRequestHeader('Authorization', 'Bearer ' + token);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) row.querySelector('i').style.width = (100 * e.loaded / e.total) + '%'; };
     xhr.onload = () => {
@@ -700,7 +706,7 @@ window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('#
 
 // ------------------------------------------------------------------ host metadata (for Wake-on-LAN in launcher)
 async function saveHostMeta(m) {
-  if (!KD.getHosts) return;
+  if (!KD.getHosts || VIA_HUB) return; // via a hub the hub keeps the device list
   try {
     const list = await KD.getHosts();
     const port = location.port || '443';
@@ -890,13 +896,19 @@ async function toggleFullscreen() {
 }
 document.addEventListener('fullscreenchange', () => { syncUI(); layout(); });
 
+function goHome() {
+  if (VIA_HUB) { location.href = '../../'; return; } // back to the hub's device list
+  if (KD.home) return KD.home();
+  location.reload();
+}
+
 async function disconnect() {
   wantOpen = false;
   send({ t: 'release' });
   if (ws) ws.close();
   stopAudio();
   if (KD.keepAwake) KD.keepAwake(false);
-  if (KD.home) return KD.home();
+  if (VIA_HUB || KD.home) return goHome();
   $('#session').hidden = true;
   showLogin('Disconnected.');
 }

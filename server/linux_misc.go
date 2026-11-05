@@ -158,3 +158,9 @@ func addFirewallRule(public bool) error {
 	exec.Command(p, "allow", "47810/udp").Run()
 	return nil
 }
+
+func addHubFirewallRule() {
+	if p := firstExisting("ufw"); p != "" && isAdmin() {
+		exec.Command(p, "allow", fmt.Sprint(getConfig().HubPort)+"/tcp").Run()
+	}
+}

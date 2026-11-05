@@ -46,6 +46,21 @@ type Config struct {
 	Devices         []TrustedDevice `json:"devices"`
 	FirewallDone    bool            `json:"firewallDone"`
 	Paused          bool            `json:"paused"`
+
+	// hub (this PC relays for other devices)
+	HubEnabled   bool            `json:"hubEnabled"`
+	HubPort      int             `json:"hubPort"`
+	HubPassSalt  string          `json:"hubPassSalt"`
+	HubPassHash  string          `json:"hubPassHash"`
+	HubPassPlain string          `json:"hubPassPlain"`
+	HubHostKey   string          `json:"hubHostKey"`
+	HubTokens    []TrustedDevice `json:"hubTokens"`
+	HubKnown     []HubDevRec     `json:"hubKnown"`
+
+	// joining a hub (this PC is reachable through it)
+	HubAddr string `json:"hubAddr"`
+	HubKey  string `json:"hubKey"`
+	HubFP   string `json:"hubFp"`
 }
 
 var (
@@ -71,6 +86,7 @@ func loadConfig() {
 		AllowPower:     true,
 		DefaultFPS:     60,
 		DefaultBitrate: 20000,
+		HubPort:        47820,
 		Encoder:        "auto",
 		UploadDir:      "", // empty = <signed-in user>\Downloads\KadduDesk (see uploadDir)
 	}
@@ -102,6 +118,7 @@ func getConfig() Config {
 	defer cfgMu.RUnlock()
 	c := cfg
 	c.Devices = append([]TrustedDevice(nil), cfg.Devices...)
+	c.HubKnown = append([]HubDevRec(nil), cfg.HubKnown...)
 	return c
 }
 

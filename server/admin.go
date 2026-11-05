@@ -146,6 +146,97 @@ func startAdmin() error {
 			os.Exit(0)
 		}()
 	})
+	// ---- hub: this PC relays for other devices
+	api("/admin/hub/settings", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Enabled *bool `json:"enabled"`
+			Port    int   `json:"port"`
+		}
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		cfgMu.Lock()
+		if req.Enabled != nil {
+			cfg.HubEnabled = *req.Enabled
+		}
+		if req.Port >= 1024 && req.Port <= 65535 && req.Port != cfg.Port {
+			cfg.HubPort = req.Port
+		}
+		saveConfigLocked()
+		cfgMu.Unlock()
+		if err := applyHubSettings(serverCert); err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error()})
+			return
+		}
+		if getConfig().HubEnabled && isAdmin() {
+			addHubFirewallRule()
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	api("/admin/hub/password", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Password string }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		p := strings.TrimSpace(req.Password)
+		if p == "" {
+			p = randomPin(8)
+		}
+		if len(p) < 6 {
+			writeJSON(w, 400, map[string]any{"error": "Use at least 6 characters"})
+			return
+		}
+		cfgMu.Lock()
+		setHubPassLocked(p)
+		saveConfigLocked()
+		cfgMu.Unlock()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	api("/admin/hub/hostkey", func(w http.ResponseWriter, r *http.Request) {
+		cfgMu.Lock()
+		cfg.HubHostKey = randomHex(12)
+		saveConfigLocked()
+		cfgMu.Unlock()
+		hub.mu.Lock() // devices using the old key must re-join
+		for _, d := range hub.devs {
+			d.ws.Close()
+		}
+		hub.mu.Unlock()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	api("/admin/hub/forget", func(w http.ResponseWriter, r *http.Request) {
+		forgetHubDevice(r.URL.Query().Get("id"))
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	// ---- joining a hub: this PC becomes reachable through another PC's hub
+	api("/admin/hub/join", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Addr, Key, FP string }
+		json.NewDecoder(io.LimitReader(r.Body, 2048)).Decode(&req)
+		req.Addr, req.Key = strings.TrimSpace(req.Addr), strings.TrimSpace(req.Key)
+		if req.Addr == "" || req.Key == "" {
+			writeJSON(w, 400, map[string]any{"error": "Enter the hub address and host key"})
+			return
+		}
+		if req.FP == "" { // step 1: show the fingerprint so the user can compare it
+			fp, name, err := probeHubFingerprint(req.Addr)
+			if err != nil {
+				writeJSON(w, 400, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, 200, map[string]any{"confirm": true, "fp": fp, "name": name})
+			return
+		}
+		cfgMu.Lock()
+		cfg.HubAddr, cfg.HubKey, cfg.HubFP = req.Addr, req.Key, strings.ToUpper(req.FP)
+		saveConfigLocked()
+		cfgMu.Unlock()
+		reconnectHub()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	api("/admin/hub/leave", func(w http.ResponseWriter, r *http.Request) {
+		cfgMu.Lock()
+		cfg.HubAddr, cfg.HubKey, cfg.HubFP = "", "", ""
+		saveConfigLocked()
+		cfgMu.Unlock()
+		reconnectHub()
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
 	api("/admin/log", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte(logRing.String()))
@@ -180,6 +271,22 @@ func adminURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d/#k=%s", getConfig().AdminPort, adminKey)
 }
 
+func hubURLs(c Config) []string {
+	var out []string
+	for _, ip := range localIPs() {
+		out = append(out, fmt.Sprintf("%s:%d", ip, c.HubPort))
+	}
+	return out
+}
+
+func prettyFP(f string) string {
+	var parts []string
+	for i := 0; i+4 <= len(f) && len(parts) < 8; i += 4 {
+		parts = append(parts, f[i:i+4])
+	}
+	return strings.Join(parts, " ")
+}
+
 func adminState(w http.ResponseWriter, r *http.Request) {
 	c := getConfig()
 	video.mu.Lock()
@@ -199,6 +306,10 @@ func adminState(w http.ResponseWriter, r *http.Request) {
 		"urls": urls, "clients": clientList(), "devices": devs, "monitors": mons,
 		"encoder": enc, "fps": fps, "kbps": kbps, "lastError": lastErr, "ffmpeg": ffmpegPath,
 		"admin": isAdmin(), "autostart": autostartEnabled(), "service": agentMode, "serviceInstalled": serviceInstalled(), "platform": platformName(), "version": version, "desktop": inputDesktopName(),
+		"deviceId": prettyID(deviceID()),
+		"hub": map[string]any{"enabled": c.HubEnabled, "running": hubRunning(), "port": c.HubPort, "password": c.HubPassPlain,
+			"hostKey": c.HubHostKey, "devices": hubDeviceList(), "urls": hubURLs(c)},
+		"hubJoin": map[string]any{"addr": c.HubAddr, "fp": prettyFP(c.HubFP), "status": hubLink.status()},
 		"settings": map[string]any{
 			"requireApproval": c.RequireApproval, "allowControl": c.AllowControl, "allowFiles": c.AllowFiles,
 			"allowAudio": c.AllowAudio, "allowClipboard": c.AllowClipboard, "allowPower": c.AllowPower,
