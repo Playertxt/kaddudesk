@@ -36,8 +36,8 @@
 |---|---|---|
 | `KadduDeskServer.exe` | The PC you want to control (Windows 10/11, 64-bit) | Host server. Single file with ffmpeg embedded. Asks for admin rights. Lives in the system tray. |
 | `KadduDesk.apk` | Android 7.0+ | Phone/tablet client. |
-| `KadduDesk-1.0.0-setup.exe` | Windows 10/11 | Desktop client, installer. |
-| `KadduDesk-1.0.0-portable.exe` | Windows 10/11 | Desktop client, no install. |
+| `KadduDesk-1.1.0-setup.exe` | Windows 10/11 | Desktop client, installer. |
+| `KadduDesk-1.1.0-portable.exe` | Windows 10/11 | Desktop client, no install. |
 | `kaddudesk-server-linux-x64.tar.gz` / `-arm64` | Linux PC / Raspberry Pi to control | Host server + installer script. |
 | `kaddudesk-client-linux-x64.tar.gz` | Linux desktop | Desktop client + installer script. |
 | any browser | Chrome / Edge / Samsung Internet | Zero-install client at `https://<pc-ip>:47800/`. |
@@ -150,7 +150,7 @@ The Android back button closes panels and the keyboard first, then opens the men
 
 ## 5. Connecting from another Windows PC
 
-- Install `KadduDesk-1.0.0-setup.exe`, or just run `KadduDesk-1.0.0-portable.exe`.
+- Install `KadduDesk-1.1.0-setup.exe`, or just run `KadduDesk-1.1.0-portable.exe`.
 - Same flow as Android: discovered PCs show up automatically, or add one by IP. Then trust, then PIN.
 - Tips:
   - Your local mouse pointer **is** the remote pointer, with the shape synced live, so movement has zero lag.

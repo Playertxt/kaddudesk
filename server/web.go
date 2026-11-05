@@ -23,7 +23,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func clientIP(r *http.Request) string {
 	if r.Context().Value(viaTunnelKey) != nil { // relayed by our hub: it tells us who the client is
