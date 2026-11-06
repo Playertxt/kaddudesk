@@ -133,9 +133,8 @@ type videoPipeline struct {
 	encoder   string
 	zeroCopy  bool
 	subs      map[*videoSub]struct{}
-	conn      *net.UDPConn
-	port      int
-	gen       atomic.Int64
+	active    *encInst // encoder whose frames viewers get
+	pending   *encInst // replacement warming up; takes over at its first keyframe
 	lastKeyRq time.Time
 	frames    atomic.Int64
 	bytes     atomic.Int64
@@ -181,19 +180,37 @@ type videoSub struct {
 }
 
 func (v *videoPipeline) init() error {
-	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		return err
-	}
-	_ = c.SetReadBuffer(16 << 20)
-	v.conn = c
-	v.port = c.LocalAddr().(*net.UDPAddr).Port
 	v.monitors = listMonitors()
 	c0 := getConfig()
 	v.cfg = VideoCfg{FPS: c0.DefaultFPS, Bitrate: c0.DefaultBitrate}
-	go v.readLoop()
 	go v.statsLoop()
 	return nil
+}
+
+// encInst is one encoder (an ffmpeg restart loop) with its own RTP socket. Restarts
+// (new settings, keyframe requests) are make-before-break: the old encoder keeps
+// streaming until the new one's first keyframe, so viewers never see a freeze.
+type encInst struct {
+	conn   *net.UDPConn
+	port   int
+	ctx    context.Context
+	cancel context.CancelFunc
+	gen    atomic.Int64 // bumped on every ffmpeg (re)start inside this instance
+}
+
+func newEncInst() (*encInst, error) {
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		return nil, err
+	}
+	_ = c.SetReadBuffer(16 << 20)
+	ctx, cancel := context.WithCancel(context.Background())
+	return &encInst{conn: c, port: c.LocalAddr().(*net.UDPAddr).Port, ctx: ctx, cancel: cancel}, nil
+}
+
+func (e *encInst) stop() {
+	e.cancel()
+	e.conn.Close()
 }
 
 func (v *videoPipeline) statsLoop() {
@@ -206,35 +223,50 @@ func (v *videoPipeline) statsLoop() {
 	}
 }
 
-func (v *videoPipeline) readLoop() {
+func (v *videoPipeline) readLoop(e *encInst) {
 	buf := make([]byte, 65536)
 	var d depack
-	gen := v.gen.Load()
+	gen := e.gen.Load()
 	for {
-		n, _, err := v.conn.ReadFromUDP(buf)
+		n, _, err := e.conn.ReadFromUDP(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 			continue // WSAECONNRESET etc.
 		}
-		if g := v.gen.Load(); g != gen { // encoder restarted → reset state
+		if g := e.gen.Load(); g != gen { // ffmpeg restarted → reset state
 			gen, d = g, depack{}
 		}
 		frame, key, ok := d.push(buf[:n])
 		if !ok {
 			continue
 		}
-		v.deliver(frame, key)
+		v.mu.Lock()
+		if e == v.pending && key {
+			if v.active != nil {
+				v.active.stop()
+			}
+			v.active, v.pending = e, nil
+		}
+		if e == v.active { // decided under the lock: no stale frame can follow the switch
+			v.deliverLocked(frame, key)
+		}
+		v.mu.Unlock()
 	}
 }
 
 // deliver hands one encoded access unit (Annex-B H.264) to every viewer.
 func (v *videoPipeline) deliver(frame []byte, key bool) {
+	v.mu.Lock()
+	v.deliverLocked(frame, key)
+	v.mu.Unlock()
+}
+
+func (v *videoPipeline) deliverLocked(frame []byte, key bool) {
 	f := Frame{Data: frame, Key: key, TS: time.Now().UnixMicro(), Seq: v.seq.Add(1)}
 	v.frames.Add(1)
 	v.bytes.Add(int64(len(frame)))
-	v.mu.Lock()
 	for sub := range v.subs {
 		select {
 		case sub.ch <- f:
@@ -242,7 +274,6 @@ func (v *videoPipeline) deliver(frame []byte, key bool) {
 			sub.dropped.Store(true)
 		}
 	}
-	v.mu.Unlock()
 }
 
 // platformVideoRun, when set (Android), replaces ffmpeg: the platform encodes the screen
@@ -295,12 +326,13 @@ func (v *videoPipeline) configure(c VideoCfg) bool {
 	return true
 }
 
-// requestKeyframe restarts the encoder (debounced). ffmpeg has no external IDR trigger.
+// requestKeyframe starts a replacement encoder (debounced): ffmpeg has no external IDR
+// trigger, and a fresh encoder always begins with one.
 func (v *videoPipeline) requestKeyframe() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if time.Since(v.lastKeyRq) < 700*time.Millisecond {
-		return
+	if v.pending != nil || time.Since(v.lastKeyRq) < 700*time.Millisecond {
+		return // a replacement is already on its way
 	}
 	v.lastKeyRq = time.Now()
 	v.startLocked()
@@ -311,6 +343,12 @@ func (v *videoPipeline) stopLocked() {
 		v.cancel()
 		v.cancel = nil
 	}
+	for _, e := range []*encInst{v.active, v.pending} {
+		if e != nil {
+			e.stop()
+		}
+	}
+	v.active, v.pending = nil, nil
 	v.running = false
 }
 
@@ -394,21 +432,33 @@ func resetEncoderProbe() {
 }
 
 func (v *videoPipeline) startLocked() {
-	v.stopLocked()
-	ctx, cancel := context.WithCancel(context.Background())
-	v.cancel = cancel
 	v.running = true
-	go v.run(ctx)
-}
-
-func (v *videoPipeline) run(ctx context.Context) {
-	if platformVideoRun != nil {
-		v.mu.Lock()
+	if platformVideoRun != nil { // Android: the app's encoder, restarted in place
+		if v.cancel != nil {
+			v.cancel()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		v.cancel = cancel
 		v.encoder, v.zeroCopy = "MediaCodec (hardware)", true
-		v.mu.Unlock()
-		platformVideoRun(ctx, v)
+		go platformVideoRun(ctx, v)
 		return
 	}
+	if v.pending != nil {
+		v.pending.stop()
+	}
+	e, err := newEncInst()
+	if err != nil {
+		v.pending = nil
+		log.Printf("video: %v", err)
+		return
+	}
+	v.pending = e
+	go v.readLoop(e)
+	go v.run(e)
+}
+
+func (v *videoPipeline) run(e *encInst) {
+	ctx := e.ctx
 	choice := v.probeEncoder()
 	v.mu.Lock()
 	v.encoder = choice.enc
@@ -417,16 +467,22 @@ func (v *videoPipeline) run(ctx context.Context) {
 	quickFails := 0
 	for ctx.Err() == nil {
 		v.mu.Lock()
-		out := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=32000&rtcpport=%d", v.port, v.port)
+		out := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=32000&rtcpport=%d", e.port, e.port)
 		args := v.buildArgs(choice.enc, choice.zeroCopy, choice.alt, out, false)
 		desk := v.captureDesktop()
 		v.mu.Unlock()
-		v.gen.Add(1)
+		e.gen.Add(1)
 		started := time.Now()
 		p, err := ffStart(ctx, args, desk)
 		if err != nil {
 			v.lastErr = err.Error()
 			log.Printf("ffmpeg start: %v", err)
+			v.mu.Lock()
+			if v.pending == e { // never came up: don't block later keyframe requests
+				v.pending = nil
+				e.stop()
+			}
+			v.mu.Unlock()
 			return
 		}
 		var errLines []string

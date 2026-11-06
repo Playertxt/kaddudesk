@@ -35,7 +35,63 @@ type Client struct {
 	viewOnly bool
 	btnDown  map[int]bool
 	sentKB   atomic.Int64
+	fl       flight
 }
+
+// flight tracks video frames sent but not yet confirmed by the viewer ("ack"), so the
+// writer stops feeding a backed-up connection instead of letting delay pile up in
+// TCP, Wi-Fi and tunnel buffers.
+type flight struct {
+	mu     sync.Mutex
+	on     bool // this viewer sends acks
+	q      []flightRec
+	minRTT time.Duration
+	minAt  time.Time
+}
+
+type flightRec struct {
+	seq uint32
+	at  time.Time
+}
+
+func (f *flight) sent(seq uint32, at time.Time) {
+	f.mu.Lock()
+	if f.on && len(f.q) < 1024 {
+		f.q = append(f.q, flightRec{seq, at})
+	}
+	f.mu.Unlock()
+}
+
+func (f *flight) ack(seq uint32) {
+	now := time.Now()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.on = true
+	i := 0
+	for ; i < len(f.q) && int32(seq-f.q[i].seq) >= 0; i++ {
+		if f.q[i].seq == seq {
+			rtt := now.Sub(f.q[i].at)
+			// the link's normal round trip; refreshed every 10 s in case the route changed
+			if f.minRTT == 0 || rtt < f.minRTT || now.Sub(f.minAt) > 10*time.Second {
+				f.minRTT, f.minAt = rtt, now
+			}
+		}
+	}
+	f.q = append(f.q[:0], f.q[i:]...)
+}
+
+// late is how long the oldest unconfirmed frame has waited beyond the normal round trip.
+func (f *flight) late() time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.on || len(f.q) == 0 {
+		return 0
+	}
+	return time.Since(f.q[0].at) - f.minRTT
+}
+
+// Delay a viewer may build up before frames are skipped (and the bitrate lowered).
+const flightBudget = 70 * time.Millisecond
 
 var (
 	clientsMu sync.Mutex
@@ -152,6 +208,7 @@ type inMsg struct {
 	K   []string  `json:"k"`
 	On  bool      `json:"on"`
 	TS  float64   `json:"ts"`
+	N   uint32    `json:"n"`
 	Cfg *VideoCfg `json:"cfg"`
 }
 
@@ -269,8 +326,15 @@ func (c *Client) writer() {
 				c.sendJSON(map[string]any{"t": "congestion"})
 				continue
 			}
+			if !waitKey && c.fl.late() > flightBudget {
+				// the connection is backing up: stop adding to it, let it drain, and
+				// resume at a fresh keyframe (the viewer also lowers its bitrate)
+				waitKey = true
+				c.sendJSON(map[string]any{"t": "congestion"})
+			}
 			if waitKey {
-				if !f.Key {
+				if !f.Key || c.fl.late() > flightBudget/2 {
+					video.requestKeyframe() // debounced; seamless on the encoder side
 					continue
 				}
 				waitKey = false
@@ -282,6 +346,7 @@ func (c *Client) writer() {
 			}
 			binary.BigEndian.PutUint64(hdr[2:], uint64(f.TS))
 			binary.BigEndian.PutUint32(hdr[10:], f.Seq)
+			c.fl.sent(f.Seq, time.Now())
 			c.conn.SetWriteDeadline(time.Now().Add(6 * time.Second))
 			w, err := c.conn.NextWriter(websocket.BinaryMessage)
 			if err != nil {
@@ -339,6 +404,8 @@ func (c *Client) handle(m *inMsg) {
 	switch m.T {
 	case "ping":
 		c.sendJSON(map[string]any{"t": "pong", "ts": m.TS})
+	case "ack": // viewer received video frame N
+		c.fl.ack(m.N)
 	case "cfg":
 		if m.Cfg != nil {
 			c.cfg = *m.Cfg

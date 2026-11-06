@@ -153,6 +153,11 @@ function sendCfg() {
     bitrate: Math.round((S.preset === 'custom' ? S.bitrate : S.preset === 'auto' ? auto.br : p.bitrate) * 1000),
     maxHeight: S.preset === 'custom' || S.preset === 'auto' || S.preset === 'balanced' ? S.maxHeight | 0 : (p.maxHeight ?? S.maxHeight) | 0,
   };
+  if (S.preset === 'auto') { // a device that can't decode fast enough gets fewer frames / pixels
+    const lv = DEC_LEVELS[auto.level];
+    cfg.fps = Math.min(cfg.fps, lv.fps);
+    if (lv.h) cfg.maxHeight = cfg.maxHeight ? Math.min(cfg.maxHeight, lv.h) : lv.h;
+  }
   send({ t: 'cfg', cfg });
 }
 
@@ -234,7 +239,7 @@ function makeDecoder(codec) {
   const d = new VideoDecoder({
     output: (frame) => {
       const rt = recvTimes.get(frame.timestamp);
-      if (rt !== undefined) { decodeMsAcc += performance.now() - rt; decodeN++; recvTimes.delete(frame.timestamp); }
+      if (rt !== undefined) { const ms = performance.now() - rt; decodeMsAcc += ms; decodeN++; auto.decAcc += ms; auto.decN++; recvTimes.delete(frame.timestamp); }
       if (frame.displayWidth !== vidW || frame.displayHeight !== vidH) {
         vidW = canvas.width = frame.displayWidth; vidH = canvas.height = frame.displayHeight; layout();
       }
@@ -258,6 +263,7 @@ function onBinary(buf) {
     const ts = Number(dv.getBigUint64(2));
     const seq = dv.getUint32(10);
     const data = new Uint8Array(buf, 14);
+    send({ t: 'ack', n: seq }); // lets the PC stop sending before delay piles up in the network
     bytes += buf.byteLength;
     auto.sample(ts);
     if (lastSeq && seq !== lastSeq + 1 && !key) needKey = true; // gap (server dropped for us)
@@ -271,7 +277,7 @@ function onBinary(buf) {
     }
     if (needKey || !decoder || decoder.state !== 'configured') { dropped++; return; }
     if (decoder.decodeQueueSize > 4) { // decoder can't keep up: resync instead of lagging
-      dropped++; needKey = true; send({ t: 'kf' }); return;
+      dropped++; needKey = true; auto.decOver++; send({ t: 'kf' }); return;
     }
     recvTimes.set(ts, performance.now());
     if (recvTimes.size > 120) recvTimes.clear();
@@ -284,8 +290,28 @@ function onBinary(buf) {
 }
 
 // ------------------------------------------------------------------ adaptive bitrate (Auto preset)
+// Two separate problems, two remedies: a slow/congested network gets a lower bitrate; a
+// device whose decoder can't keep up (common on phones) gets fewer frames, then fewer pixels.
+const DEC_LEVELS = [{ fps: 60, h: 0 }, { fps: 30, h: 0 }, { fps: 30, h: 720 }, { fps: 30, h: 540 }];
 const auto = {
   br: 20, minOff: Infinity, samples: [], lastChange: 0, goodSince: 0, offT: 0,
+  level: 0, decAcc: 0, decN: 0, decOver: 0, decBadAt: 0, decGoodSince: 0, levelAt: 0,
+  // decoder health for the last second; true when frames wait too long to be decoded
+  decCheck() {
+    const avg = this.decN ? this.decAcc / this.decN : 0, over = this.decOver, now = performance.now();
+    this.decAcc = 0; this.decN = 0; this.decOver = 0;
+    const bad = over > 0 || avg > 50;
+    if (bad) { this.decBadAt = now; this.decGoodSince = 0; } else if (avg < 20) { if (!this.decGoodSince) this.decGoodSince = now; } else this.decGoodSince = 0;
+    return bad;
+  },
+  decoderBound() { return performance.now() - this.decBadAt < 3000; },
+  setLevel(l) {
+    l = Math.max(0, Math.min(DEC_LEVELS.length - 1, l));
+    if (l === this.level) return;
+    this.level = l; this.levelAt = performance.now(); this.decGoodSince = 0;
+    this.samples = []; this.minOff = Infinity;
+    sendCfg();
+  },
   sample(ts) {
     const off = performance.timeOrigin + performance.now() - ts / 1000; // one-way delay + clock offset
     const now = performance.now();
@@ -294,10 +320,23 @@ const auto = {
     if (this.samples.length > 60) this.samples.shift();
   },
   queueDelay() { const a = [...this.samples].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length * 0.5)] : 0; },
-  congestion() { if (S.preset === 'auto') this.adjust(0.6, true); },
+  congestion() {
+    if (S.preset !== 'auto') return;
+    if (this.decoderBound()) return; // the decoder is the bottleneck: a lower bitrate won't help
+    this.adjust(0.6, true);
+  },
   tick() {
     if (S.preset !== 'auto' || !ws || embedMode === 'thumb') return;
     const q = this.queueDelay(), now = performance.now();
+    const decBad = this.decCheck();
+    if (decBad && q < 30) { // network fine, decoder behind
+      if (now - this.levelAt > 3000) this.setLevel(this.level + 1);
+      return;
+    }
+    if (this.level > 0 && q < 12 && this.decGoodSince && now - this.decGoodSince > 20000 && now - this.levelAt > 20000) {
+      this.setLevel(this.level - 1); // decoder has had headroom for a while: try more again
+      return;
+    }
     if (q > 45) { this.goodSince = 0; this.adjust(0.7); }
     else if (q < 12) { if (!this.goodSince) this.goodSince = now; if (now - this.goodSince > 8000) { this.goodSince = now; this.adjust(1.2); } }
     else this.goodSince = 0;
@@ -758,7 +797,7 @@ function updateStats() {
     `decode ${dec.toFixed(1)} ms · ${fps.toFixed(0)} fps\n` +
     `${mbps.toFixed(1)} Mbps · ${vidW}×${vidH}\n` +
     (srvStats ? `${srvStats.enc}${srvStats.zc ? ' (zero-copy)' : ''} · srv ${srvStats.fps} fps\n` : '') +
-    (S.preset === 'auto' ? `auto bitrate ${auto.br} Mbps\n` : '') +
+    (S.preset === 'auto' ? `auto bitrate ${auto.br} Mbps${auto.level ? ` · decoder-limited: ${DEC_LEVELS[auto.level].fps} fps${DEC_LEVELS[auto.level].h ? ', ' + DEC_LEVELS[auto.level].h + 'p' : ''}` : ''}\n` : '') +
     `dropped ${dropped} · ${codecStr}`;
 }
 setInterval(() => { send({ t: 'ping', ts: performance.now() }); auto.tick(); }, 1000);
@@ -768,7 +807,7 @@ let uiReady = false;
 function initUI() {
   if (uiReady) { layout(); return; }
   uiReady = true;
-  auto.br = Math.min(S.bitrate || 20, 30);
+  auto.br = Math.min(S.bitrate || 20, isTouch ? 10 : 30); // phones: start lighter, Auto raises it when the link allows
   // bubble (touch): draggable; tap opens drawer
   const bub = $('#bubble');
   const bpos = JSON.parse(localStorage.kd_bubble || 'null') || { x: 1, y: 0.25 };
