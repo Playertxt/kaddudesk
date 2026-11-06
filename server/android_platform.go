@@ -24,6 +24,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"tailscale.com/net/dnscache"
 )
 
 var (
@@ -78,6 +80,9 @@ func init() {
 		}
 		return nil, last
 	}}
+	// Tailscale's control client makes its own resolver that reads /etc/resolv.conf,
+	// which Android doesn't have, so "Anywhere" could never find Tailscale's server.
+	dnscache.Get().Forward = net.DefaultResolver
 }
 
 // ------------------------------------------------------------ bridge
