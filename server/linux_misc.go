@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !kdandroid
 
 package main
 
@@ -164,3 +164,40 @@ func addHubFirewallRule() {
 		exec.Command(p, "allow", fmt.Sprint(getConfig().HubPort)+"/tcp").Run()
 	}
 }
+
+var hostLockFile *os.File
+
+// acquireHostLock: the app may run the host in-process unless a separate server already does.
+func acquireHostLock() bool {
+	if lockFile != nil || hostLockFile != nil {
+		return true
+	}
+	f, err := os.OpenFile(filepath.Join(dataDir, "server.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false
+	}
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		f.Close()
+		return false
+	}
+	hostLockFile = f
+	return true
+}
+
+func launchHostElevated() error { return errors.New("not needed on Linux") }
+
+func extraBroadcasts() []string { return nil }
+
+func defaultAppPaths() []string {
+	return []string{"/opt/kaddudesk-client/kaddudesk-client", "/usr/local/bin/kaddudesk"}
+}
+
+func notify(title, msg string) {
+	if p := firstExisting("notify-send"); p != "" {
+		exec.Command(p, title, msg).Start()
+	}
+}
+
+func runAsUser(cmdline string) error { return exec.Command("sh", "-c", cmdline).Start() }
+
+func platformIPs() []string { return nil }

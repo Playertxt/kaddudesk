@@ -61,6 +61,10 @@ type Config struct {
 	HubAddr string `json:"hubAddr"`
 	HubKey  string `json:"hubKey"`
 	HubFP   string `json:"hubFp"`
+	// MeshEnabled: "Connect from anywhere" (embedded Tailscale node)
+	MeshEnabled bool `json:"meshEnabled"`
+	// AppPath: the KadduDesk app that started this host (opened from the tray)
+	AppPath string `json:"appPath"`
 	// DenyHubUsers: ignore hub accounts and always ask for this PC's PIN
 	DenyHubUsers bool `json:"denyHubUsers"`
 }
@@ -77,6 +81,9 @@ func loadConfig() {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 	host, _ := os.Hostname()
+	if *flagDevName != "" {
+		host = *flagDevName
+	}
 	cfg = Config{
 		Name:           host,
 		Port:           47800,
@@ -94,6 +101,9 @@ func loadConfig() {
 	}
 	if b, err := os.ReadFile(cfgPath()); err == nil {
 		_ = json.Unmarshal(b, &cfg)
+	}
+	if cfg.Name == "localhost" && *flagDevName != "" { // Android's hostname is useless
+		cfg.Name = *flagDevName
 	}
 	if cfg.PinHash == "" {
 		setPinLocked(randomPin(6))

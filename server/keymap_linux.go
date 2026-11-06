@@ -1,3 +1,5 @@
+//go:build linux && !kdandroid
+
 package main
 
 // linKeys maps DOM KeyboardEvent.code to Linux evdev KEY_* codes (layout-independent positions).

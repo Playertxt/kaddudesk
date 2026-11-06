@@ -225,20 +225,29 @@ func (v *videoPipeline) readLoop() {
 		if !ok {
 			continue
 		}
-		f := Frame{Data: frame, Key: key, TS: time.Now().UnixMicro(), Seq: v.seq.Add(1)}
-		v.frames.Add(1)
-		v.bytes.Add(int64(len(frame)))
-		v.mu.Lock()
-		for sub := range v.subs {
-			select {
-			case sub.ch <- f:
-			default: // viewer is behind; it resyncs on the next keyframe
-				sub.dropped.Store(true)
-			}
-		}
-		v.mu.Unlock()
+		v.deliver(frame, key)
 	}
 }
+
+// deliver hands one encoded access unit (Annex-B H.264) to every viewer.
+func (v *videoPipeline) deliver(frame []byte, key bool) {
+	f := Frame{Data: frame, Key: key, TS: time.Now().UnixMicro(), Seq: v.seq.Add(1)}
+	v.frames.Add(1)
+	v.bytes.Add(int64(len(frame)))
+	v.mu.Lock()
+	for sub := range v.subs {
+		select {
+		case sub.ch <- f:
+		default: // viewer is behind; it resyncs on the next keyframe
+			sub.dropped.Store(true)
+		}
+	}
+	v.mu.Unlock()
+}
+
+// platformVideoRun, when set (Android), replaces ffmpeg: the platform encodes the screen
+// itself and calls v.deliver for each frame until ctx ends.
+var platformVideoRun func(ctx context.Context, v *videoPipeline)
 
 func (v *videoPipeline) subscribe() *videoSub {
 	sub := &videoSub{ch: make(chan Frame, 6)}
@@ -335,6 +344,9 @@ var (
 
 // probeEncoder finds the fastest working capture+encoder combo on this PC.
 func (v *videoPipeline) probeEncoder() encChoice {
+	if platformVideoRun != nil {
+		return encChoice{enc: "mediacodec"}
+	}
 	probedMu.Lock()
 	defer probedMu.Unlock()
 	if probedChoice != nil {
@@ -390,6 +402,13 @@ func (v *videoPipeline) startLocked() {
 }
 
 func (v *videoPipeline) run(ctx context.Context) {
+	if platformVideoRun != nil {
+		v.mu.Lock()
+		v.encoder, v.zeroCopy = "MediaCodec (hardware)", true
+		v.mu.Unlock()
+		platformVideoRun(ctx, v)
+		return
+	}
 	choice := v.probeEncoder()
 	v.mu.Lock()
 	v.encoder = choice.enc

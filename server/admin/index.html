@@ -49,17 +49,21 @@ pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px;
   </div>
   <div style="flex:1"></div>
   <button id="pauseBtn"></button>
-  <button class="danger" id="quitBtn">Quit server</button>
+  <button class="danger" id="quitBtn">Stop sharing</button>
 </header>
 <main>
+  <section class="card" id="androidCard" hidden>
+    <h2>Share this phone</h2>
+    <div class="toggle"><div>Screen sharing <span class="badge" id="andShareBadge"></span><div class="muted tiny">Android asks your permission every time sharing starts.</div></div><button class="primary" id="andShare">Start sharing</button></div>
+    <div class="toggle"><div>Remote control <span class="badge" id="andAccBadge"></span><div class="muted tiny">Turn on <b>KadduDesk</b> under Accessibility so other devices can tap, swipe and type here.</div></div><button id="andAcc">Open settings</button></div>
+  </section>
   <section class="card">
     <h2>Connect a device</h2>
     <div class="row between"><div class="muted">PIN</div><div class="row"><button id="pinShow">Show</button><button id="pinNew">New PIN</button><button id="pinSet">Set…</button></div></div>
     <div class="pin hidden" id="pin">••••••</div>
-    <p class="muted tiny" style="margin:12px 0 4px">In the KadduDesk app on your phone or PC, this PC appears automatically on the same Wi-Fi. Or add it by address:</p>
+    <div class="row between" style="margin-top:12px"><div class="muted">Device ID</div><code id="devId" style="font-size:16px;color:var(--accent)"></code></div>
+    <p class="muted tiny" style="margin:12px 0 4px">Open the KadduDesk app on your other device: this one appears under <b>Nearby</b> (same Wi-Fi) or <b>Anywhere</b>. You can also add it by one of these addresses:</p>
     <div id="urls"></div>
-    <img class="qr" id="qr" alt="QR">
-    <p class="muted tiny" style="text-align:center">Scan with a phone camera to open it in a browser.</p>
     <p class="muted tiny">Certificate fingerprint (check that the app shows the same):<br><code id="fp"></code></p>
   </section>
 
@@ -147,12 +151,12 @@ pre { background:#0c0e12; border-radius: 10px; padding: 10px; max-height: 260px;
 <script>
 const key = new URLSearchParams(location.hash.slice(1)).get('k') || sessionStorage.k || '';
 sessionStorage.k = key;
-history.replaceState(null, '', '/');
+history.replaceState(null, '', location.pathname);
 const $ = (s) => document.querySelector(s);
 const api = async (p, body) => {
   const r = await fetch(p, { method: body ? 'POST' : 'GET', headers: { 'X-KD-Key': key, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.status);
+  if (!r.ok) { const e = new Error(j.error || r.status); e.status = r.status; e.data = j; throw e; }
   return j;
 };
 let st = null, selUrl = 0, pinVisible = false, formLoaded = false;
@@ -160,9 +164,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const ago = (t) => { const s = (Date.now() - new Date(t)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : Math.floor(s / 86400) + ' d ago'; };
 
 async function refresh() {
-  try { st = await api('/admin/state'); } catch (e) { $('#sub').textContent = 'Not authorised — open the panel from the tray icon.'; return; }
+  try { st = await api('admin/state'); } catch (e) { if (e.status === 503) return showOff(); $('#sub').textContent = 'Not available: ' + e.message; return; }
+  if (offShown) location.reload();
   $('#name').textContent = st.name;
-  $('#adminBadge').textContent = st.service ? 'Service · SYSTEM' : st.admin ? 'Administrator' : 'Not elevated';
+  $('#adminBadge').textContent = st.platform === 'Android' ? 'Android' : st.platform === 'Linux' ? 'Linux' : st.service ? 'Service · SYSTEM' : st.admin ? 'Administrator' : 'Not elevated';
+  if (st.platform === 'Android' || st.platform === 'Linux') $('#adminBadge').className = 'badge';
   $('#adminBadge').className = 'badge ' + (st.admin ? 'ok' : 'warn');
   const paused = st.settings.paused;
   $('#runBadge').textContent = paused ? 'Paused' : 'Running';
@@ -173,18 +179,18 @@ async function refresh() {
   $('#pin').classList.toggle('hidden', !pinVisible);
   $('#fp').textContent = st.fp;
   const urls = $('#urls');
-  urls.innerHTML = st.urls.map((u, i) => `<div class="url ${i === selUrl ? 'on' : ''}" data-i="${i}"><code>${esc(u)}</code><span class="muted tiny">${i === selUrl ? 'QR ↓' : ''}</span></div>`).join('') || '<div class="empty">No network connection</div>';
+  urls.innerHTML = (st.urls || []).map((u) => `<div class="url"><code>${esc(u.replace(/^https:\/\//, '').replace(/\/$/, ''))}</code></div>`).join('') || '<div class="empty">No network connection</div>';
   urls.querySelectorAll('.url').forEach((el) => el.onclick = () => { selUrl = +el.dataset.i; refresh(); });
   const u = st.urls[selUrl] || st.urls[0];
-  if (u && $('#qr').dataset.u !== u) { $('#qr').src = `/admin/qr.png?k=${key}&u=${encodeURIComponent(u)}`; $('#qr').dataset.u = u; }
+  $('#devId').textContent = st.deviceId;
   $('#nViewers').textContent = st.clients ? st.clients.length : 0;
   $('#sFps').textContent = st.clients && st.clients.length ? Math.round(st.fps) + ' fps' : 'idle';
   $('#sKbps').textContent = st.clients && st.clients.length ? (st.kbps / 1000).toFixed(1) + ' Mbps' : '–';
   $('#encInfo').textContent = `Encoder: ${st.encoder || 'detecting…'} · GPU: ${(st.monitors[0] || {}).gpu || '?'}` + (st.lastError ? ` · last ffmpeg message: ${st.lastError}` : '');
   $('#clients').innerHTML = (st.clients || []).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="muted tiny">${esc(c.ip)} · since ${ago(c.since)}</div></td><td style="text-align:right"><button class="danger" data-kick="${c.id}">Disconnect</button></td></tr>`).join('') || '<tr><td class="empty">Nobody is connected</td></tr>';
   $('#devices').innerHTML = st.devices.map((d) => `<tr><td><b>${esc(d.name)}</b><div class="muted tiny">last seen ${ago(d.lastSeen)} from ${esc(d.lastIP)}</div></td><td style="text-align:right"><button class="danger" data-rm="${d.id}">Forget</button></td></tr>`).join('') || '<tr><td class="empty">No remembered devices</td></tr>';
-  document.querySelectorAll('[data-kick]').forEach((b) => b.onclick = () => api('/admin/client/kick?id=' + b.dataset.kick).then(refresh));
-  document.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => confirm('Forget this device? It will need the PIN again.') && api('/admin/device/remove?id=' + b.dataset.rm).then(refresh));
+  document.querySelectorAll('[data-kick]').forEach((b) => b.onclick = () => api('admin/client/kick?id=' + b.dataset.kick).then(refresh));
+  document.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => confirm('Forget this device? It will need the PIN again.') && api('admin/device/remove?id=' + b.dataset.rm).then(refresh));
   document.querySelectorAll('[data-k]').forEach((cb) => cb.checked = !!st.settings[cb.dataset.k]);
   $('#autostart').checked = st.autostart;
   $('#service').checked = st.service;
@@ -195,19 +201,20 @@ async function refresh() {
   $('#service').closest('.toggle').hidden = linux;
   if (linux) $('#autostartRow > div').innerHTML = 'Start at login<div class="muted tiny">Adds KadduDesk to your desktop session autostart</div>';
   renderHub();
+  renderPlatform();
   if (!formLoaded) {
     formLoaded = true;
     $('#pcname').value = st.settings.name; $('#dfps').value = st.settings.defaultFps; $('#dbr').value = Math.round(st.settings.defaultBitrate / 1000);
     $('#encoder').value = st.settings.encoder; $('#updir').value = st.settings.uploadDir; $('#port').value = st.settings.port;
   }
 }
-document.querySelectorAll('[data-k]').forEach((cb) => cb.onchange = () => api('/admin/settings', { [cb.dataset.k]: cb.checked }).then(refresh));
+document.querySelectorAll('[data-k]').forEach((cb) => cb.onchange = () => api('admin/settings', { [cb.dataset.k]: cb.checked }).then(refresh));
 $('#pinShow').onclick = $('#pin').onclick = () => { pinVisible = !pinVisible; $('#pinShow').textContent = pinVisible ? 'Hide' : 'Show'; refresh(); };
-$('#pinNew').onclick = async () => { if (!confirm('Generate a new PIN? Remembered devices stay signed in.')) return; await api('/admin/pin', { pin: '' }); pinVisible = true; refresh(); };
-$('#pinSet').onclick = async () => { const p = prompt('New PIN (4–32 characters):'); if (!p) return; try { await api('/admin/pin', { pin: p }); pinVisible = true; refresh(); } catch (e) { alert(e.message); } };
-$('#pauseBtn').onclick = () => api('/admin/settings', { paused: !st.settings.paused }).then(refresh);
-$('#kickAll').onclick = () => api('/admin/kickall').then(refresh);
-$('#reprobe').onclick = () => api('/admin/reprobe').then(() => setTimeout(refresh, 1500));
+$('#pinNew').onclick = async () => { if (!confirm('Generate a new PIN? Remembered devices stay signed in.')) return; await api('admin/pin', { pin: '' }); pinVisible = true; refresh(); };
+$('#pinSet').onclick = async () => { const p = prompt('New PIN (4–32 characters):'); if (!p) return; try { await api('admin/pin', { pin: p }); pinVisible = true; refresh(); } catch (e) { alert(e.message); } };
+$('#pauseBtn').onclick = () => api('admin/settings', { paused: !st.settings.paused }).then(refresh);
+$('#kickAll').onclick = () => api('admin/kickall').then(refresh);
+$('#reprobe').onclick = () => api('admin/reprobe').then(() => setTimeout(refresh, 1500));
 $('#service').onchange = async (e) => {
   const on = e.target.checked;
   const msg = on
@@ -215,23 +222,23 @@ $('#service').onchange = async (e) => {
     : 'Turn off Service mode?\n\nThe service is removed and KadduDesk stops. Start KadduDeskServer.exe again to use normal mode.';
   if (!confirm(msg)) { e.target.checked = !on; return; }
   try {
-    await api('/admin/service?on=' + (on ? 1 : 0));
+    await api('admin/service?on=' + (on ? 1 : 0));
     document.body.insertAdjacentHTML('afterbegin', '<div style="padding:14px 28px;background:#3a2a20">' + (on ? 'Switching to Service mode… this page reconnects automatically.' : 'Service mode removed. KadduDesk has stopped.') + '</div>');
-    if (on) { let n = 0; const t = setInterval(async () => { n++; try { await api('/admin/state'); clearInterval(t); location.reload(); } catch (e) { if (n > 40) clearInterval(t); } }, 1000); }
+    if (on) { let n = 0; const t = setInterval(async () => { n++; try { await api('admin/state'); clearInterval(t); location.reload(); } catch (e) { if (n > 40) clearInterval(t); } }, 1000); }
   } catch (er) { alert(er.message); e.target.checked = !on; }
 };
-$('#autostart').onchange = (e) => api('/admin/autostart?on=' + (e.target.checked ? 1 : 0)).then(refresh).catch((er) => { alert(er.message); refresh(); });
+$('#autostart').onchange = (e) => api('admin/autostart?on=' + (e.target.checked ? 1 : 0)).then(refresh).catch((er) => { alert(er.message); refresh(); });
 $('#saveSrv').onclick = async () => {
   try {
     const oldPort = st.settings.port;
-    await api('/admin/settings', { name: $('#pcname').value, defaultFps: +$('#dfps').value, defaultBitrate: +$('#dbr').value * 1000, encoder: $('#encoder').value, uploadDir: $('#updir').value, port: +$('#port').value });
+    await api('admin/settings', { name: $('#pcname').value, defaultFps: +$('#dfps').value, defaultBitrate: +$('#dbr').value * 1000, encoder: $('#encoder').value, uploadDir: $('#updir').value, port: +$('#port').value });
     formLoaded = false; await refresh();
     alert(+$('#port').value !== oldPort ? 'Saved. Restart the server for the new port to take effect.' : 'Saved.');
   } catch (e) { alert(e.message); }
 };
-$('#fw').onclick = () => api('/admin/firewall').then(() => alert('Firewall rule added for private networks.')).catch((e) => alert(e.message));
-$('#fwPub').onclick = () => confirm('Allow connections on PUBLIC networks too (cafés, airports)? Only do this if you understand the risk; the PIN still protects access.') && api('/admin/firewall?public=1').then(() => alert('Allowed on all networks.')).catch((e) => alert(e.message));
-$('#quitBtn').onclick = () => confirm('Stop the KadduDesk server? Nobody will be able to connect until you start it again.') && api('/admin/quit').then(() => document.body.innerHTML = '<p style="padding:40px">Server stopped. You can close this tab.</p>');
+$('#fw').onclick = () => api('admin/firewall').then(() => alert('Firewall rule added for private networks.')).catch((e) => alert(e.message));
+$('#fwPub').onclick = () => confirm('Allow connections on PUBLIC networks too (cafés, airports)? Only do this if you understand the risk; the PIN still protects access.') && api('admin/firewall?public=1').then(() => alert('Allowed on all networks.')).catch((e) => alert(e.message));
+$('#quitBtn').onclick = () => confirm('Stop sharing this device? Nobody can connect to it until you turn sharing on again.') && api('admin/quit').then(() => setTimeout(() => location.reload(), 800));
 
 let hubKeyVis = false;
 function renderHub() {
@@ -251,7 +258,7 @@ function renderHub() {
   $('#trustHub').checked = !st.settings.denyHubUsers;
   $('#hubKey').textContent = hubKeyVis ? h.hostKey : '••••••••';
   $('#hubDevs').innerHTML = h.devices.map((d) => `<tr><td><b>${esc(d.name)}</b> ${d.self ? '<span class="badge">this PC</span>' : ''}<div class="muted tiny">${esc(d.pretty)} · ${esc(d.os || '')} · ${d.online ? '<span style="color:var(--ok)">online</span>' : 'offline'}</div></td><td style="text-align:right">${d.self ? '' : `<button class="danger" data-forget="${d.id}">Remove</button>`}</td></tr>`).join('');
-  document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = () => confirm('Remove this device from the hub list? It reappears if it connects again with the host key.') && api('/admin/hub/forget?id=' + b.dataset.forget).then(refresh));
+  document.querySelectorAll('[data-forget]').forEach((b) => b.onclick = () => confirm('Remove this device from the hub list? It reappears if it connects again with the host key.') && api('admin/hub/forget?id=' + b.dataset.forget).then(refresh));
   const joined = !!j.addr;
   $('#joinForm').hidden = joined; $('#joinStatus').hidden = !joined;
   if (joined) {
@@ -261,33 +268,68 @@ function renderHub() {
     $('#joinErr').textContent = j.status.error || '';
   }
 }
-$('#hubOn').onchange = (e) => api('/admin/hub/settings', { enabled: e.target.checked }).then(refresh).catch((er) => { alert(er.message); refresh(); });
+$('#hubOn').onchange = (e) => api('admin/hub/settings', { enabled: e.target.checked }).then(refresh).catch((er) => { alert(er.message); refresh(); });
 $('#ownBtn').onclick = async () => {
-  try { await api('/admin/hub/owner', { username: $('#ownU').value, password: $('#ownP').value }); $('#ownP').value = ''; alert('Owner account created. Open the hub and sign in to set up two-factor authentication.'); refresh(); }
+  try { await api('admin/hub/owner', { username: $('#ownU').value, password: $('#ownP').value }); $('#ownP').value = ''; alert('Owner account created. Open the hub and sign in to set up two-factor authentication.'); refresh(); }
   catch (e) { alert(e.message); }
 };
-$('#acctOpen').onclick = () => { const u = (st.hub.urls || [])[0]; window.open('https://' + (u || ('127.0.0.1:' + st.hub.port)) + '/', '_blank'); };
+$('#acctOpen').onclick = () => { if (window.parent !== window) parent.postMessage({ kd: 'openLocalHub', port: st.hub.port }, location.origin); };
 $('#acctRec').onclick = async () => {
   const u = prompt('Recover which account? (resets its password and turns off its 2FA; it must set up 2FA again)');
   if (!u) return;
   const p = prompt('New password for ' + u + ' (10+ characters, mixed):');
   if (!p) return;
-  try { await api('/admin/hub/recover', { username: u, password: p }); alert('Done. Sign in to the hub as ' + u + ' with the new password.'); refresh(); } catch (e) { alert(e.message); }
+  try { await api('admin/hub/recover', { username: u, password: p }); alert('Done. Sign in to the hub as ' + u + ' with the new password.'); refresh(); } catch (e) { alert(e.message); }
 };
-$('#trustHub').onchange = (e) => api('/admin/settings', { denyHubUsers: !e.target.checked }).then(refresh);
+$('#trustHub').onchange = (e) => api('admin/settings', { denyHubUsers: !e.target.checked }).then(refresh);
 $('#hubKeyShow').onclick = () => { hubKeyVis = !hubKeyVis; renderHub(); };
-$('#hubKeyNew').onclick = async () => { if (!confirm('Generate a new host key? Every PC on this hub must re-join with the new key.')) return; await api('/admin/hub/hostkey'); hubKeyVis = true; refresh(); };
+$('#hubKeyNew').onclick = async () => { if (!confirm('Generate a new host key? Every PC on this hub must re-join with the new key.')) return; await api('admin/hub/hostkey'); hubKeyVis = true; refresh(); };
 $('#joinBtn').onclick = async () => {
   const addr = $('#joinAddr').value.trim(), key = $('#joinKey').value.trim();
   try {
-    const r = await api('/admin/hub/join', { addr, key });
+    const r = await api('admin/hub/join', { addr, key });
     if (!confirm(`Join hub "${r.name || addr}"?\n\nCheck that this fingerprint matches the Certificate fingerprint shown on the hub PC:\n\n${r.fp.match(/.{4}/g).slice(0, 8).join(' ')}`)) return;
-    await api('/admin/hub/join', { addr, key, fp: r.fp });
+    await api('admin/hub/join', { addr, key, fp: r.fp });
     refresh();
   } catch (e) { alert(e.message); }
 };
-$('#leaveBtn').onclick = () => confirm('Leave the hub? This PC will no longer be reachable through it.') && api('/admin/hub/leave').then(refresh);
-const loadLog = async () => { const r = await fetch('/admin/log', { headers: { 'X-KD-Key': key } }); $('#log').textContent = await r.text(); $('#log').scrollTop = 1e9; };
+$('#leaveBtn').onclick = () => confirm('Leave the hub? This PC will no longer be reachable through it.') && api('admin/hub/leave').then(refresh);
+const KDN = window.KD || (window.parent !== window && parent.KD) || {};
+let offShown = false;
+function showOff() {
+  offShown = true;
+  $('header').hidden = true;
+  document.querySelector('main').innerHTML = `<section class="card wide" style="text-align:center;padding:36px 20px">
+    <div style="font-size:42px">🔒</div><h2 style="margin:10px 0">Sharing is off</h2>
+    <p>Turn it on to let your other devices see and control this device.</p>
+    <p class="muted tiny">On Windows you'll be asked for administrator permission once (so admin windows can be controlled too).</p>
+    <button class="primary" id="startShare" style="margin-top:8px">Turn on sharing</button><p class="muted tiny" id="startErr" style="color:var(--bad)"></p></section>`;
+  $('#startShare').onclick = async () => {
+    const b = $('#startShare'); b.disabled = true; b.textContent = 'Starting…';
+    try {
+      const r = await fetch('/app/api/local/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.status);
+      location.reload();
+    } catch (e) { $('#startErr').textContent = e.message; b.disabled = false; b.textContent = 'Turn on sharing'; }
+  };
+}
+function renderPlatform() {
+  const andr = st.platform === 'Android';
+  $('#androidCard').hidden = !andr;
+  if (andr) {
+    let s = {};
+    try { s = JSON.parse(KDN.sharingState ? KDN.sharingState() : '{}'); } catch (e) {}
+    $('#andShareBadge').textContent = s.sharing ? 'on' : 'off'; $('#andShareBadge').className = 'badge ' + (s.sharing ? 'ok' : '');
+    $('#andShare').textContent = s.sharing ? 'Stop sharing' : 'Start sharing';
+    $('#andAccBadge').textContent = s.accessibility ? 'on' : 'off'; $('#andAccBadge').className = 'badge ' + (s.accessibility ? 'ok' : 'warn');
+    $('#andShare').onclick = () => { if (s.sharing) KDN.stopSharing && KDN.stopSharing(); else KDN.startSharing && KDN.startSharing(); setTimeout(refresh, 1500); };
+    $('#andAcc').onclick = () => KDN.openAccessibility && KDN.openAccessibility();
+    for (const id of ['#service', '#autostart', '#encoder', '#fw', '#port']) { const el = $(id); if (el) (el.closest('.toggle') || el).hidden = true; }
+    const fp = $('#fwPub'); if (fp) fp.hidden = true;
+  }
+}
+const loadLog = async () => { const r = await fetch('admin/log', { headers: { 'X-KD-Key': key } }); $('#log').textContent = await r.text(); $('#log').scrollTop = 1e9; };
 $('#logRefresh').onclick = loadLog;
 refresh(); loadLog();
 setInterval(refresh, 2000);

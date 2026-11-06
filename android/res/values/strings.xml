@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="acc_label">KadduDesk remote control</string>
+    <string name="acc_desc">Lets devices you connect with KadduDesk tap, swipe, type and press Back/Home on this phone while you share its screen. KadduDesk only acts on commands from devices you allowed (PIN or your hub account) and never reads or stores screen content.</string>
+</resources>

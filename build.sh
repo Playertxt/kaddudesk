@@ -13,9 +13,7 @@ WHAT="${1:-all}"
 mkdir -p dist
 
 sync_shared() {
-  # the launcher reuses the web client's stylesheet and native bridge
-  cp server/web/style.css server/web/bridge.js clients/launcher/
-  cp server/web/icon.png clients/launcher/icon.png
+  : # (2.0: the app UI is embedded in the core; nothing to copy)
 }
 
 fetch_ffmpeg() {
@@ -70,7 +68,10 @@ with tarfile.open(out,'w:gz') as t:
 }
 
 build_linux_client() {
-  echo "== linux client"
+  echo "== linux app"
+  [ -f build/linux-amd64/kaddudesk-server/kaddudesk-server ] || build_linux
+  rm -rf build/core-linux; mkdir -p build/core-linux
+  cp build/linux-amd64/kaddudesk-server/kaddudesk-server build/core-linux/
   # AppImage needs symlinks (not allowed on Windows without admin) -> package the app dir ourselves
   npx electron-builder --linux dir --x64
   cp linux/client/kaddudesk-client linux/client/install-client.sh dist/electron/linux-unpacked/
@@ -78,7 +79,7 @@ build_linux_client() {
   python -c "
 import tarfile,sys,os
 src,out,root=sys.argv[1],sys.argv[2],'kaddudesk-client-linux-x64'
-exe={'kaddudesk','chrome_crashpad_handler','kaddudesk-client','install-client.sh','chrome-sandbox'}
+exe={'kaddudesk','chrome_crashpad_handler','kaddudesk-client','install-client.sh','chrome-sandbox','kaddudesk-server'}
 with tarfile.open(out,'w:gz') as t:
     for dp,dn,fn in os.walk(src):
         dn.sort()
@@ -101,15 +102,17 @@ build_android() {
   # prefer platform 36 if present (stable)
   [ -f "$SDK/platforms/android-36/android.jar" ] && PLAT="$SDK/platforms/android-36/android.jar"
   B="build/android"
-  rm -rf "$B"; mkdir -p "$B/assets/launcher" "$B/classes" "$B/dex" "$B/gen"
-  cp clients/launcher/index.html clients/launcher/style.css clients/launcher/bridge.js clients/launcher/icon.png "$B/assets/launcher/"
+  rm -rf "$B"; mkdir -p "$B/classes" "$B/dex" "$B/gen" "$B/lib/arm64-v8a" "$B/lib/x86_64"
+  # the KadduDesk core as a native executable: arm64 for phones, x86_64 for emulators/ChromeOS
+  (cd server && GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -tags kdandroid -trimpath -ldflags "-s -w" -o "../$B/lib/arm64-v8a/libkdcore.so" .)
+  (cd server && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags kdandroid -trimpath -ldflags "-s -w" -o "../$B/lib/x86_64/libkdcore.so" .)
   "$BT/aapt2" compile --dir android/res -o "$B/res.zip"
-  "$BT/aapt2" link -o "$B/base.apk" -I "$PLAT" --manifest android/AndroidManifest.xml -A "$B/assets" \
-     --min-sdk-version 24 --target-sdk-version 35 --version-code 3 --version-name 1.2.0 --java "$B/gen" "$B/res.zip"
+  "$BT/aapt2" link -o "$B/base.apk" -I "$PLAT" --manifest android/AndroidManifest.xml \
+     --min-sdk-version 24 --target-sdk-version 35 ${KD_ANDROID_DEBUG:+--debug-mode} --java "$B/gen" "$B/res.zip"
   javac --release 11 -nowarn -encoding UTF-8 -classpath "$PLAT" -d "$B/classes" \
      $(find android/src -name '*.java') $(find "$B/gen" -name '*.java')
   "$BT/d8.bat" --release --min-api 24 --lib "$PLAT" --output "$B/dex" $(find "$B/classes" -name '*.class')
-  python -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'a',zipfile.ZIP_DEFLATED); z.write(sys.argv[2],'classes.dex'); z.close()" "$B/base.apk" "$B/dex/classes.dex"
+  python -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'a',zipfile.ZIP_DEFLATED); z.write(sys.argv[2],'classes.dex'); [z.write(sys.argv[3]+'/'+a+'/libkdcore.so','lib/'+a+'/libkdcore.so') for a in ('arm64-v8a','x86_64')]; z.close()" "$B/base.apk" "$B/dex/classes.dex" "$B/lib"
   "$BT/zipalign.exe" -p -f 4 "$B/base.apk" "$B/aligned.apk"
   KEYTOOL="$(command -v keytool || true)"
   if [ -z "$KEYTOOL" ]; then
@@ -129,7 +132,11 @@ build_android() {
 }
 
 build_windows() {
-  echo "== windows client"
+  echo "== windows app"
+  # the app bundles the KadduDesk core (the same exe that shares this PC)
+  [ -f dist/KadduDeskServer.exe ] || build_server
+  rm -rf build/core-win; mkdir -p build/core-win
+  cp dist/KadduDeskServer.exe build/core-win/
   npx electron-builder --win portable nsis
   cp dist/electron/KadduDesk-*-portable.exe dist/ 2>/dev/null || true
   cp dist/electron/KadduDesk-*-setup.exe dist/ 2>/dev/null || true

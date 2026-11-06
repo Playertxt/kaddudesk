@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -19,6 +22,7 @@ var (
 	flagAgent     = flag.Bool("agent", false, "internal: SYSTEM agent started by the service")
 	flagInstall   = flag.Bool("install-service", false, "install Service mode (lock screen + UAC access) and exit")
 	flagUninstall = flag.Bool("uninstall-service", false, "remove Service mode and exit")
+	flagNoElevate = flag.Bool("noelevate", false, "don't ask for admin rights (testing; admin windows can't be controlled)")
 )
 
 func platformName() string { return "Windows" }
@@ -33,6 +37,14 @@ func platformEarly() bool {
 	}
 	setDPIAware()
 	agentMode = *flagAgent
+	// Sharing this PC needs admin rights (to control admin windows). The exe itself starts
+	// without them so the app can run it; as a host it re-launches itself elevated.
+	if !*flagApp && !agentMode && !*flagInstall && !*flagUninstall && !*flagNoElevate && !isAdmin() {
+		if err := shellRunAs(os.Args[1:]); err != nil {
+			fatal("KadduDesk needs administrator rights to share this PC: %v", err)
+		}
+		return true
+	}
 	if *flagInstall || *flagUninstall {
 		initDataDir()
 		loadConfig()
@@ -136,3 +148,55 @@ func sendSAS() bool {
 	p.Call(0)
 	return true
 }
+
+func shellRunAs(args []string) error {
+	exe, _ := os.Executable()
+	var parts []string
+	for _, a := range args {
+		parts = append(parts, syscall.EscapeArg(a))
+	}
+	verb, _ := windows.UTF16PtrFromString("runas")
+	file, _ := windows.UTF16PtrFromString(exe)
+	params, _ := windows.UTF16PtrFromString(strings.Join(parts, " "))
+	dir, _ := windows.UTF16PtrFromString(filepath.Dir(exe))
+	return windows.ShellExecute(0, verb, file, params, dir, windows.SW_SHOWNORMAL)
+}
+
+// launchHostElevated starts sharing from the app: the host runs as admin (one UAC prompt).
+func launchHostElevated() error {
+	args := []string{"-minimized"}
+	if *flagAppPath != "" {
+		args = append(args, "-apppath", *flagAppPath)
+	}
+	if err := shellRunAs(args); err != nil {
+		return fmt.Errorf("sharing needs administrator rights: %v", err)
+	}
+	for i := 0; i < 40; i++ { // wait until it answers
+		time.Sleep(250 * time.Millisecond)
+		app.mu.Lock()
+		app.extCache = time.Time{}
+		app.mu.Unlock()
+		if externalHostOK() {
+			return nil
+		}
+	}
+	return fmt.Errorf("sharing didn't start — check the KadduDesk tray icon")
+}
+
+func acquireHostLock() bool { return false }
+
+func extraBroadcasts() []string { return nil }
+
+func defaultAppPaths() []string {
+	la := os.Getenv("LOCALAPPDATA")
+	pf := os.Getenv("ProgramFiles")
+	return []string{filepath.Join(la, "Programs", "KadduDesk", "KadduDesk.exe"), filepath.Join(pf, "KadduDesk", "KadduDesk.exe")}
+}
+
+func notify(title, msg string) {
+	t, _ := windows.UTF16PtrFromString(title)
+	m, _ := windows.UTF16PtrFromString(msg)
+	go windows.MessageBox(0, m, t, 0x40)
+}
+
+func platformIPs() []string { return nil }

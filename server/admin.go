@@ -22,6 +22,9 @@ var adminHTML []byte
 
 var adminKey string
 
+// adminMuxV is the control API; the app calls it in-process on Linux/Android.
+var adminMuxV *http.ServeMux
+
 // The admin panel listens on 127.0.0.1 only. Requests must carry the per-install key
 // (blocks other websites from driving it via CSRF) and a localhost Host header
 // (blocks DNS rebinding).
@@ -34,6 +37,7 @@ func startAdmin() error {
 		os.WriteFile(keyFile, []byte(adminKey), 0o600)
 	}
 	mux := http.NewServeMux()
+	adminMuxV = mux
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -238,12 +242,21 @@ func startAdmin() error {
 		reconnectHub()
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
+	registerMeshAdmin(api)
 	api("/admin/log", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte(logRing.String()))
 	})
 	api("/admin/quit", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
+		if *flagApp { // the host lives inside the app: "stop sharing" just refuses connections
+			cfgMu.Lock()
+			cfg.Paused = true
+			saveConfigLocked()
+			cfgMu.Unlock()
+			kickAll()
+			return
+		}
 		go func() { time.Sleep(300 * time.Millisecond); quit() }()
 	})
 

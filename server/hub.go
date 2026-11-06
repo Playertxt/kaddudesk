@@ -12,7 +12,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -55,6 +54,22 @@ var hub = struct {
 	sess    map[string]time.Time // short-lived client sessions (tokenHash → expiry)
 }{devs: map[string]*hubDev{}, pending: map[string]chan *wsNetConn{}, proxies: map[string]*httputil.ReverseProxy{}, sess: map[string]time.Time{}}
 
+var hubMuxV *http.ServeMux
+
+func currentHubMux() *http.ServeMux {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	return hubMuxV
+}
+
+// noBrowserPage answers browsers that open a KadduDesk port directly.
+func noBrowserPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>KadduDesk</title><body style="font:16px system-ui;background:#0f1115;color:#eee;display:grid;place-items:center;height:90vh;text-align:center"><div><h2>KadduDesk works in its app</h2><p>Install the KadduDesk app on Windows, Android or Linux and connect from there.</p></div>`))
+}
+
 var idRe = regexp.MustCompile(`^/d/(\d{9})(/.*)?$`)
 
 func hubRunning() bool {
@@ -73,6 +88,7 @@ func applyHubSettings(cert tls.Certificate) error {
 		hub.mu.Lock()
 		hub.srv.Close()
 		hub.srv = nil
+		hubMuxV = nil
 		hub.mu.Unlock()
 	}
 	if !c.HubEnabled {
@@ -85,27 +101,9 @@ func applyHubSettings(cert tls.Certificate) error {
 		cfgMu.Unlock()
 	}
 	mux := http.NewServeMux()
-	sub, _ := fs.Sub(hubFS, "hubweb")
-	webSub, _ := fs.Sub(webFS, "web")
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		secHeaders(w)
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
-		switch r.URL.Path {
-		case "/", "/index.html":
-			http.ServeFileFS(w, r, sub, "index.html")
-		case "/hub.js":
-			http.ServeFileFS(w, r, sub, "hub.js")
-		case "/bridge.js", "/style.css", "/icon.png":
-			http.ServeFileFS(w, r, webSub, strings.TrimPrefix(r.URL.Path, "/"))
-		default:
-			http.NotFound(w, r)
-		}
-	})
+	mux.HandleFunc("/", noBrowserPage) // KadduDesk is app-only: no web pages
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"app": "kaddudesk-hub", "name": getConfig().Name, "version": version, "fp": certFingerprint})
+		writeJSON(w, 200, map[string]any{"app": "kaddudesk-hub", "name": getConfig().Name, "version": version, "fp": certFingerprint, "os": platformName(), "id": deviceID()})
 	})
 	registerAccountAPI(mux)
 	mux.HandleFunc("/hub/host", hubHostConn)
@@ -120,6 +118,7 @@ func applyHubSettings(cert tls.Certificate) error {
 	}
 	hub.mu.Lock()
 	hub.srv = srv
+	hubMuxV = mux
 	hub.mu.Unlock()
 	go srv.ServeTLS(tcpNoDelay{ln}, "", "")
 	logf("hub listening on :%d", c.HubPort)

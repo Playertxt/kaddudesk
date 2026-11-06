@@ -2,63 +2,85 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"sync"
 	"time"
-
-	"fyne.io/systray"
 )
 
 var (
 	flagNoTray    = flag.Bool("notray", false, "run without tray icon")
-	flagMinimized = flag.Bool("minimized", false, "don't open the control panel on start")
+	flagMinimized = flag.Bool("minimized", false, "start in the background")
 	flagDevHTTP   = flag.String("devhttp", "", "also serve plain HTTP on a loopback address, e.g. 127.0.0.1:47899 (testing)")
 	flagDevHub    = flag.String("devhub", "", "also serve the hub over plain HTTP on a loopback address (testing)")
 	flagProfile   = flag.String("profile", "", "run a separate instance with its own settings (testing / multiple instances)")
-	trayReady     bool
-	trayMu        sync.Mutex
-	mStatus       *systray.MenuItem
-	mPause        *systray.MenuItem
+	flagApp       = flag.Bool("app", false, "run as the KadduDesk app core (the app's UI and connections)")
+	flagAppPort   = flag.Int("appport", 0, "fixed loopback port for the app UI (0 = remembered/random)")
+	flagDataDir   = flag.String("datadir", "", "settings folder (used by the Android app)")
+	flagAppPath   = flag.String("apppath", "", "path of the KadduDesk app, opened from the tray icon")
 )
 
 var serverCert tls.Certificate
 
 var agentMode bool // Windows: running as the SYSTEM agent started by the service
 
+var hostStarted bool
+
 func main() {
 	flag.Parse()
-	if platformEarly() { // service entry point, -install-service, ... handled and done
+	if platformEarly() { // service entry point, -install-service, self-elevation … handled
 		return
 	}
-	selectDataDir()
+	if *flagDataDir != "" {
+		initDataDirAt(*flagDataDir)
+	} else {
+		selectDataDir()
+	}
 	if *flagProfile != "" {
 		initDataDirAt(dataDir + "-" + *flagProfile)
 	}
-
-	logFile, _ := os.OpenFile(filepath.Join(dataDir, "server.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	logRing.f = logFile
-	log.SetOutput(logRing)
-	log.SetFlags(log.LstdFlags)
-
-	// single instance: a second launch just opens the control panel of the running one
+	if *flagApp {
+		runApp()
+		return
+	}
+	setupLog(filepath.Join(dataDir, "server.log"))
+	// single instance: a second launch just brings up the app / control panel of the running one
 	if alreadyRunning() {
 		return
 	}
+	if err := startHost(); err != nil {
+		fatal("%v", err)
+	}
+	if *flagNoTray || !trayAvailable() {
+		select {}
+	}
+	runTray()
+}
 
+func setupLog(path string) {
+	logFile, _ := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	logRing.f = logFile
+	log.SetOutput(logRing)
+	log.SetFlags(log.LstdFlags)
+}
+
+// startHost brings up everything that makes this device controllable. Used by the
+// standalone server and, on Linux/Android, inside the app itself.
+func startHost() error {
 	loadConfig()
 	loadAccounts()
 	loadAudit()
-	logf("KadduDesk server %s starting on %s (admin=%v)", version, platformName(), isAdmin())
+	logf("KadduDesk %s host starting on %s (admin=%v)", version, platformName(), isAdmin())
 	cert, err := loadOrCreateCert()
 	if err != nil {
-		fatal("Could not create TLS certificate: %v", err)
+		return fmt.Errorf("could not create TLS certificate: %v", err)
 	}
 	if err := findFFmpeg(); err != nil {
-		fatal("%v", err)
+		return err
 	}
 	logf("ffmpeg: %s", ffmpegPath)
 	platformStart()
@@ -66,7 +88,7 @@ func main() {
 		logf("input: %v", err)
 	}
 	if err := video.init(); err != nil {
-		fatal("video init: %v", err)
+		return fmt.Errorf("video init: %v", err)
 	}
 	if err := audio.init(); err != nil {
 		logf("audio init: %v", err)
@@ -82,16 +104,19 @@ func main() {
 		err = startWebServer(cert)
 	}
 	if err != nil {
-		fatal("Could not listen on port %d: %v\n\nIs another program using it?", getConfig().Port, err)
+		return fmt.Errorf("could not listen on port %d: %v — is another program using it?", getConfig().Port, err)
 	}
+	serverCert = cert
 	startTunnelServer(webMux) // serves devices that reach us through a hub
 	go hubClientLoop()
 	if err := applyHubSettings(cert); err != nil {
 		logf("hub: %v", err)
 	}
-	serverCert = cert
 	if err := startAdmin(); err != nil {
 		logf("admin panel: %v", err)
+	}
+	if getConfig().MeshEnabled {
+		go startMesh(false)
 	}
 	if c := getConfig(); !c.FirewallDone && isAdmin() && !agentMode {
 		if err := addFirewallRule(false); err == nil {
@@ -103,80 +128,9 @@ func main() {
 	}
 	go video.probeEncoder() // warm up so the first connection is instant
 	c := getConfig()
-	logf("listening on https://0.0.0.0:%d  (fingerprint %s)", c.Port, prettyFingerprint())
-	for _, ip := range localIPs() {
-		logf("  connect: https://%s:%d/", ip, c.Port)
-	}
-	if !*flagMinimized {
-		openBrowser(adminURL())
-	}
-	if *flagNoTray || !trayAvailable() {
-		select {}
-	}
-	systray.Run(onTrayReady, func() {})
-}
-
-func onTrayReady() {
-	systray.SetIcon(trayIcon)
-	systray.SetTitle("KadduDesk")
-	mStatus = systray.AddMenuItem("KadduDesk server", "")
-	mStatus.Disable()
-	systray.AddSeparator()
-	mOpen := systray.AddMenuItem("Open control panel", "")
-	mPause = systray.AddMenuItemCheckbox("Pause sharing", "Refuse all connections", getConfig().Paused)
-	mKick := systray.AddMenuItem("Disconnect everyone", "")
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit KadduDesk", "")
-	trayMu.Lock()
-	trayReady = true
-	trayMu.Unlock()
-	updateTray()
-	go func() {
-		for {
-			select {
-			case <-mOpen.ClickedCh:
-				openBrowser(adminURL())
-			case <-mPause.ClickedCh:
-				cfgMu.Lock()
-				cfg.Paused = !cfg.Paused
-				saveConfigLocked()
-				p := cfg.Paused
-				cfgMu.Unlock()
-				if p {
-					kickAll()
-				}
-				updateTray()
-			case <-mKick.ClickedCh:
-				kickAll()
-			case <-mQuit.ClickedCh:
-				quit()
-			}
-		}
-	}()
-	systray.SetOnTapped(func() { openBrowser(adminURL()) })
-}
-
-func updateTray() {
-	trayMu.Lock()
-	ready := trayReady
-	trayMu.Unlock()
-	if !ready {
-		return
-	}
-	c := getConfig()
-	n := clientCount()
-	status := fmt.Sprintf("Ready  ·  PIN %s", c.PinPlain)
-	if c.Paused {
-		status = "Paused"
-		mPause.Check()
-	} else {
-		mPause.Uncheck()
-	}
-	if n > 0 {
-		status = fmt.Sprintf("%d device(s) connected", n)
-	}
-	mStatus.SetTitle(status)
-	systray.SetTooltip("KadduDesk — " + status)
+	logf("listening on :%d  (fingerprint %s, ID %s)", c.Port, prettyFingerprint(), prettyID(deviceID()))
+	hostStarted = true
+	return nil
 }
 
 func quit() {
@@ -185,11 +139,33 @@ func quit() {
 	os.Exit(0)
 }
 
-// openAdminOfRunningCopy is used by a second launch: show the running copy's control panel.
+// openApp launches the KadduDesk app (the tray icon's "Open KadduDesk").
+func openApp() {
+	for _, p := range appCandidates() {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			if runAsUser(`"`+p+`"`) == nil || exec.Command(p).Start() == nil {
+				return
+			}
+		}
+	}
+	notify("KadduDesk", fmt.Sprintf("This device is shared.\n\nID: %s\nPIN: %s\n\nInstall the KadduDesk app to change settings.", prettyID(deviceID()), getConfig().PinPlain))
+}
+
+func appCandidates() []string {
+	var out []string
+	if *flagAppPath != "" {
+		out = append(out, *flagAppPath)
+	}
+	if p := getConfig().AppPath; p != "" {
+		out = append(out, p)
+	}
+	return append(out, defaultAppPaths()...)
+}
+
+// openAdminOfRunningCopy is used by a second launch: show the running copy.
 func openAdminOfRunningCopy() {
 	loadConfig()
-	if b, err := os.ReadFile(filepath.Join(dataDir, "adminkey")); err == nil {
-		adminKey = string(b)
-		openBrowser(adminURL())
-	}
+	openApp()
 }
+
+var errNotSupported = errors.New("not supported on this device")

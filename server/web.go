@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,7 +22,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-const version = "1.2.0"
+const version = "2.0.0"
 
 func clientIP(r *http.Request) string {
 	if r.Context().Value(viaTunnelKey) != nil { // relayed by our hub: it tells us who the client is
@@ -141,17 +140,15 @@ var webMux *http.ServeMux
 func startWebServer(cert tls.Certificate) error {
 	mux := http.NewServeMux()
 	webMux = mux
-	sub, _ := fs.Sub(webFS, "web")
-	static := http.FileServer(http.FS(sub))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		static.ServeHTTP(w, r)
-	})
+	mux.HandleFunc("/", noBrowserPage) // the UI ships inside the KadduDesk apps
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		c := getConfig()
-		writeJSON(w, 200, map[string]any{"app": "kaddudesk", "name": c.Name, "version": version,
-			"fp": certFingerprint, "paused": c.Paused, "macs": macAddrs(), "id": deviceID()})
+		m := map[string]any{"app": "kaddudesk", "name": c.Name, "version": version, "os": platformName(),
+			"fp": certFingerprint, "paused": c.Paused, "macs": macAddrs(), "id": deviceID()}
+		if hubRunning() {
+			m["hubPort"] = c.HubPort
+		}
+		writeJSON(w, 200, m)
 	})
 	mux.HandleFunc("/api/login", handleLogin)
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
@@ -459,7 +456,7 @@ func discoveryLoop() {
 			continue
 		}
 		c := getConfig()
-		m := map[string]any{"app": "kaddudesk", "name": c.Name, "port": c.Port,
+		m := map[string]any{"app": "kaddudesk", "name": c.Name, "port": c.Port, "os": platformName(),
 			"fp": certFingerprint, "macs": macAddrs(), "version": version, "id": deviceID()}
 		if hubRunning() {
 			m["hubPort"] = c.HubPort

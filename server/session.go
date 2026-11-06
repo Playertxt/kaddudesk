@@ -191,7 +191,7 @@ func runSession(conn *websocket.Conn, name, deviceID, ip string, viewOnly bool) 
 			"clipboard": conf.AllowClipboard && !viewOnly, "power": conf.AllowPower && !viewOnly,
 		},
 		"macs": macAddrs(), "admin": isAdmin(), "fp": certFingerprint, "you": c.id,
-		"service": agentMode, "desk": inputDesktopName(),
+		"service": agentMode, "desk": inputDesktopName(), "os": platformName(),
 	})
 	c.vsub = video.subscribe()
 	if !video.configure(c.cfg) {
@@ -599,6 +599,9 @@ func localIPs() []string {
 	var out []string
 	for _, m := range macAddrs() {
 		out = append(out, m.IP)
+	}
+	if len(out) == 0 { // Android 11+ hides interfaces from apps; the app tells us instead
+		out = append(out, platformIPs()...)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
 	return out

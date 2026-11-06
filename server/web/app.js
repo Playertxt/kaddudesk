@@ -164,6 +164,7 @@ function onCtl(m) {
       $('#pcInfo').textContent = `v${m.version} · ${m.service ? 'service mode' : m.admin ? 'admin mode' : 'standard mode'}`;
       onDesk(m.desk, m.service);
       buildMonitors(m.monitors);
+      setupRemoteOS(m.os);
       saveHostMeta(m);
       if (!m.features.control) toast('View-only: the PC owner disabled remote control');
       sendCfg();
@@ -180,6 +181,20 @@ function onCtl(m) {
     case 'notice': toast(m.s, 4000); break;
     case 'desk': onDesk(m.s, m.service); break;
   }
+}
+
+// Controlling an Android phone: add its system buttons and use direct touch on phones.
+function setupRemoteOS(os) {
+  if (os !== 'Android' || $('#qaBack')) return;
+  if (isTouch && S.mode === 'trackpad') S.mode = 'touch'; // not saved: only for this session
+  const q = $('.quick');
+  for (const [id, label, ic, a] of [['qaBack', 'Back', '◀', 'back'], ['qaHome', 'Home', '●', 'home'], ['qaRecents', 'Recents', '■', 'recents'], ['qaNotif', 'Notifications', '🔔', 'notifications']]) {
+    const b = document.createElement('button');
+    b.className = 'qa'; b.id = id; b.innerHTML = `<i>${ic}</i><span>${label}</span>`;
+    b.onclick = () => { send({ t: 'power', a }); vib(10); };
+    q.appendChild(b);
+  }
+  const cad = $('#qaCad'); if (cad) cad.hidden = true;
 }
 
 // lock screen / UAC prompt: visible only in Service mode

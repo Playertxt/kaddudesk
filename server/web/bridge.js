@@ -37,6 +37,11 @@
       vibrate: (ms) => A.vibrate(ms | 0),
       deviceName: async () => A.deviceName(),
       showKeyboard: (on) => A.showKeyboard(!!on),
+      openExternal: (u) => A.openUrl(u),
+      startSharing: () => A.startSharing(),
+      stopSharing: () => A.stopSharing(),
+      sharingState: () => A.sharingState(),
+      openAccessibility: () => A.openAccessibility(),
     };
   } else {
     api = {

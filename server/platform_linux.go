@@ -1,3 +1,5 @@
+//go:build linux && !kdandroid
+
 package main
 
 import (

@@ -1,3 +1,5 @@
+//go:build linux && !kdandroid
+
 package main
 
 // Input on Linux goes through /dev/uinput: the kernel sees a real keyboard, mouse and
